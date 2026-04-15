@@ -101,6 +101,71 @@
       );
     }
 
+    // ── Minecraft term correction ──
+    // Русский ASR часто искажает игровую терминологию — исправляем фонетически близкие варианты
+
+    const MC_CORRECTIONS = [
+      [/\bэнд[эе]р\b/gi, "эндер"],
+      [/\bендер\b/gi, "эндер"],
+      [/\bэндермэн\b/gi, "эндермен"],
+      [/\bэндермэна?\b/gi, "эндермена"],
+      [/\bкрипп?ер\b/gi, "крипер"],
+      [/\bви[зс]ер\b/gi, "визер"],
+      [/\bвай[зс]ер\b/gi, "визер"],
+      [/\bпиглен\b/gi, "пиглин"],
+      [/\bпигл[иы]н\b/gi, "пиглин"],
+      [/\bпик[лн]\s*ин\b/gi, "пиглин"],
+      [/\bр[эе]д\s*стон\b/gi, "редстоун"],
+      [/\bр[эе]дстоун\b/gi, "редстоун"],
+      [/\bред\s*стоун\b/gi, "редстоун"],
+      [/\bобс[иы]д[иы]ан\b/gi, "обсидиан"],
+      [/\bапс[иы]д[иы]ан\b/gi, "обсидиан"],
+      [/\bопс[иы]д[иы]ан\b/gi, "обсидиан"],
+      [/\bнотш\b/gi, "нотч"],
+      [/\bноч\b/gi, "нотч"],
+      [/\bкрафт[иы]нг\b/gi, "крафтинг"],
+      [/\bкрафтить\b/gi, "крафтить"],
+      [/\bзомб[иы]фиц[иы]рованный\b/gi, "зомбифицированный"],
+      [/\bзомб[иы]фицированн?ый\b/gi, "зомбифицированный"],
+      [/\bзомб[иы]пиглин\b/gi, "зомбифицированный пиглин"],
+      [/\bне[зс]ер[иы]т\b/gi, "незерит"],
+      [/\bнез[еэ]р[иы]т\b/gi, "незерит"],
+      [/\bне[зс]ер\b/gi, "незер"],
+      [/\bниж[нь]+[иы][йй]\s*мир\b/gi, "нижний мир"],
+      [/\bнижн[ий]+\s*мир\b/gi, "нижний мир"],
+      [/\bзач[аа]рован[ие]+\b/gi, "зачарование"],
+      [/\bзач[аа]ровывание\b/gi, "зачарование"],
+      [/\bспаун\b/gi, "спавн"],
+      [/\bспав[нм]\b/gi, "спавн"],
+      [/\bкрафт\s*верстак\b/gi, "верстак"],
+      [/\bфарм[иы]нг\b/gi, "фарминг"],
+      [/\bг[рл][иы]фер\b/gi, "грифер"],
+      [/\bтекстур\s*пак\b/gi, "текстурпак"],
+      [/\bшулк[еэ]р\b/gi, "шалкер"],
+      [/\bшалк[еэ]р\b/gi, "шалкер"],
+      [/\bиллюз[ои]р\b/gi, "иллюзор"],
+      [/\bпри[зс]рак\b/gi, "фантом"],
+      [/\bфантом\b/gi, "фантом"],
+      [/\bч[уе]д[иы]ще\b/gi, "чудище"],
+      [/\bблейз\b/gi, "блейз"],
+      [/\bбл[еэ][йи][зс]\b/gi, "блейз"],
+      [/\bгаст\b/gi, "гаст"],
+      [/\bга[зс]т\b/gi, "гаст"],
+      [/\bслайм\b/gi, "слайм"],
+      [/\bсла[йи]м\b/gi, "слайм"],
+      [/\bгол[еэ]м\b/gi, "голем"],
+      [/\bкрай\b/gi, "край"],
+      [/\bэнд\b/gi, "энд"],
+    ];
+
+    function correctMinecraftTerms(text) {
+      let result = text;
+      for (const [pattern, replacement] of MC_CORRECTIONS) {
+        result = result.replace(pattern, replacement);
+      }
+      return result;
+    }
+
     // ── Speech Recognition Hook ──
 
     function useSpeechRecognition() {
@@ -120,7 +185,7 @@
           r.onresult = (e) => {
             let t = "";
             for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-            setTranscript(t);
+            setTranscript(correctMinecraftTerms(t));
           };
           r.onend = () => setListening(false);
           r.onerror = () => setListening(false);
@@ -150,6 +215,7 @@
       const [apiKey, setApiKey] = useState(() => localStorage.getItem("mc_quiz_api_key") || "");
       const [apiKeyInput, setApiKeyInput] = useState("");
       const [apiKeyError, setApiKeyError] = useState("");
+      const [apiKeyTesting, setApiKeyTesting] = useState(false);
       const [currentQ, setCurrentQ] = useState(null);
       const [questionNum, setQuestionNum] = useState(0);
       const [scores, setScores] = useState([]);
@@ -234,16 +300,23 @@
         setScreen("result");
       }, [currentQ]);
 
-      const handleSaveKey = () => {
+      const handleSaveKey = async () => {
         const key = apiKeyInput.trim();
         if (!key) {
           setApiKeyError("Введите API-ключ");
           return;
         }
-        localStorage.setItem("mc_quiz_api_key", key);
-        setApiKey(key);
+        setApiKeyTesting(true);
         setApiKeyError("");
-        setApiKeyInput("");
+        try {
+          await callClaude(key, "Ответь одним словом.", "Скажи: ок");
+          localStorage.setItem("mc_quiz_api_key", key);
+          setApiKey(key);
+          setApiKeyInput("");
+        } catch (e) {
+          setApiKeyError("Ключ не работает: " + (e.message || "ошибка соединения"));
+        }
+        setApiKeyTesting(false);
       };
 
       const handleStart = () => {
@@ -318,11 +391,11 @@
               {/* API Key section */}
               <div style={styles.apiKeyBox}>
                 <div style={styles.apiKeyLabel}>
-                  {apiKey ? "✓ API-ключ сохранён" : "Введите Anthropic API-ключ"}
+                  {apiKey ? "✓ DeepSeek API-ключ сохранён" : "DeepSeek API-ключ"}
                 </div>
                 {apiKey ? (
                   <div style={styles.apiKeyRow}>
-                    <span style={styles.apiKeyMasked}>sk-ant-···{apiKey.slice(-6)}</span>
+                    <span style={styles.apiKeyMasked}>···{apiKey.slice(-6)}</span>
                     <button style={styles.btnSmall} onClick={() => { localStorage.removeItem("mc_quiz_api_key"); setApiKey(""); }}>
                       Сменить
                     </button>
@@ -331,17 +404,19 @@
                   <>
                     <div style={styles.apiKeyRow}>
                       <input
-                        style={styles.textField}
+                        style={{ ...styles.textField, opacity: apiKeyTesting ? 0.5 : 1 }}
                         type="password"
-                        placeholder="sk-ant-..."
+                        placeholder="Введите ключ..."
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSaveKey()}
+                        onKeyDown={(e) => e.key === "Enter" && !apiKeyTesting && handleSaveKey()}
+                        disabled={apiKeyTesting}
                       />
-                      <button style={styles.btnSmall} onClick={handleSaveKey}>
-                        Сохранить
+                      <button style={{ ...styles.btnSmall, opacity: apiKeyTesting ? 0.6 : 1 }} onClick={handleSaveKey} disabled={apiKeyTesting}>
+                        {apiKeyTesting ? "..." : "Сохранить"}
                       </button>
                     </div>
+                    {apiKeyTesting && <div style={styles.apiKeyHint}>Проверяем ключ...</div>}
                     {apiKeyError && <div style={styles.errorText}>{apiKeyError}</div>}
                     <div style={styles.apiKeyHint}>
                       Ключ хранится только в вашем браузере.<br/>
@@ -725,6 +800,8 @@
         width: "100%",
         maxWidth: 300,
         transition: "all 0.2s",
+        userSelect: "none",
+        WebkitUserSelect: "none",
       },
       micBtnActive: {
         background: "rgba(255,0,0,0.12)",
