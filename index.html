@@ -38,28 +38,28 @@
     ];
 
     const TOTAL_QUESTIONS = 10;
-    const API_URL = "https://api.anthropic.com/v1/messages";
-    const MODEL = "claude-sonnet-4-20250514";
+    const API_URL = "https://api.deepseek.com/chat/completions";
+    const MODEL = "deepseek-chat";
 
     async function callClaude(apiKey, systemPrompt, userPrompt) {
       const resp = await fetch(API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
+          "Authorization": "Bearer " + apiKey,
         },
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userPrompt }],
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
         }),
       });
       if (!resp.ok) throw new Error("API error " + resp.status);
       const data = await resp.json();
-      return data.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+      return data.choices[0].message.content;
     }
 
     function parseJSON(raw) {
@@ -236,8 +236,8 @@
 
       const handleSaveKey = () => {
         const key = apiKeyInput.trim();
-        if (!key.startsWith("sk-ant-")) {
-          setApiKeyError("Ключ должен начинаться с sk-ant-");
+        if (!key) {
+          setApiKeyError("Введите API-ключ");
           return;
         }
         localStorage.setItem("mc_quiz_api_key", key);
