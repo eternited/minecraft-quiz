@@ -356,7 +356,25 @@ async function main() {
     const q = { question: "Коренной блок острова в Крае?", correct_answer: "Адский камень", difficulty: "easy", acceptable_answers: ["адский камень"] };
     const out = T.applyVerification(q, { verdict: "fix", corrected_answer: "Камень Края", acceptable_answers: ["эндерняк", "end stone"] });
     assert.strictEqual(out.correct_answer, "Камень Края");
+    assert.strictEqual(out.question, "Коренной блок острова в Крае?");
     jeq(out.acceptable_answers, ["эндерняк", "end stone"]);
+  });
+  test("applyVerification: corrected_question переписывает устаревшую формулировку", () => {
+    const q = { question: "Что нужно для чародейского стола?", correct_answer: "Книга", difficulty: "medium", acceptable_answers: ["книга"] };
+    const fixed = T.applyVerification(q, {
+      verdict: "fix",
+      corrected_question: "Какие предметы нужны для крафта стола зачарований?",
+      corrected_answer: "Книга, алмазы и обсидиан",
+      acceptable_answers: ["книга", "алмаз", "обсидиан"],
+    });
+    assert.strictEqual(fixed.question, "Какие предметы нужны для крафта стола зачарований?");
+    assert.strictEqual(fixed.correct_answer, "Книга, алмазы и обсидиан");
+    jeq(fixed.acceptable_answers, ["книга", "алмаз", "обсидиан"]);
+    // corrected_question работает и при verdict ok; пустая строка игнорируется
+    const okFixed = T.applyVerification(q, { verdict: "ok", corrected_question: "Новый текст?", acceptable_answers: [] });
+    assert.strictEqual(okFixed.question, "Новый текст?");
+    const noFix = T.applyVerification(q, { verdict: "ok", corrected_question: "  ", acceptable_answers: [] });
+    assert.strictEqual(noFix.question, "Что нужно для чародейского стола?");
   });
   test("applyVerification: reject → null, мусорный вердикт → вопрос как есть", () => {
     const q = { question: "В?", correct_answer: "О", difficulty: "easy", acceptable_answers: [] };
@@ -368,8 +386,30 @@ async function main() {
     assert.ok(T.QUESTION_SYSTEM_PROMPT.includes("Нижний мир ≠ Край"));
     assert.ok(T.QUESTION_SYSTEM_PROMPT.includes("эндерняк"));
   });
+  test("генерация: только актуальная локализация с анти-примерами", () => {
+    assert.ok(/актуальную официальную русскую локализацию/.test(T.QUESTION_SYSTEM_PROMPT));
+    assert.ok(T.QUESTION_SYSTEM_PROMPT.includes("чародейский стол"), "нет анти-примера про стол зачарований");
+  });
+  test("генерация: правило про несколько верных ответов (рецепты)", () => {
+    assert.ok(/верных ответов несколько/.test(T.QUESTION_SYSTEM_PROMPT));
+    assert.ok(/КАЖДЫЙ верный ответ/.test(T.QUESTION_SYSTEM_PROMPT));
+  });
+  test("факт-чекер: проверка локализации и равноправных ответов, corrected_question в формате", () => {
+    assert.ok(/актуальной официальной русской локализации/.test(T.VERIFY_SYSTEM_PROMPT));
+    assert.ok(T.VERIFY_SYSTEM_PROMPT.includes("чародейский стол"));
+    assert.ok(T.VERIFY_SYSTEM_PROMPT.includes("corrected_question"));
+    assert.ok(/верных ответов несколько/.test(T.VERIFY_SYSTEM_PROMPT));
+  });
   test("судья вправе исправить неверный эталонный ответ", () => {
     assert.ok(/противоречит вопросу или фактам игры/.test(T.EVAL_SYSTEM_PROMPT));
+  });
+  test("судья засчитывает любой из равноправных верных ответов", () => {
+    assert.ok(/несколько верных ответов/.test(T.EVAL_SYSTEM_PROMPT));
+    assert.ok(/ЛЮБОЙ/.test(T.EVAL_SYSTEM_PROMPT));
+  });
+  test("синоним «чародейский стол» = «стол зачарований» → 5", () => {
+    const r = T.localScore("чародейский стол", { correct_answer: "Стол зачарований", acceptable_answers: [] });
+    assert.strictEqual(r.score, 5);
   });
 
   console.log("\ncallAI:");

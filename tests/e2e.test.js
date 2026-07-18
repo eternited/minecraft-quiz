@@ -113,7 +113,11 @@ async function scenarioWithApi(browser, base) {
       }
       if (sys.includes("факт-чекер")) {
         verifyRequests.push(body);
-        return route.fulfill(aiChoice({ verdict: "ok", acceptable_answers: ["проверенный вариант"] }));
+        // Вопрос №3 факт-чекер «исправляет»: и формулировку, и ответ
+        const isQ3 = body.messages[1].content.includes("Тестовый вопрос №3?");
+        return route.fulfill(aiChoice(isQ3
+          ? { verdict: "fix", corrected_question: "Исправленный вопрос №3?", corrected_answer: "Исправленный ответ 3", acceptable_answers: ["новый вариант"] }
+          : { verdict: "ok", acceptable_answers: ["проверенный вариант"] }));
       }
       if (sys.includes("судья")) {
         evalRequests.push(body);
@@ -184,9 +188,10 @@ async function scenarioWithApi(browser, base) {
   await page.getByText("5 из 5").waitFor({ timeout: 20000 });
   assert.ok(await page.getByText("Отлично!").isVisible(), "после апгрейда нет локального комментария");
 
-  // Вопрос 3: сумма очков должна учесть поднятую оценку (5+5)
+  // Вопрос 3: факт-чекер переписал формулировку — на экране исправленный текст;
+  // сумма очков должна учесть поднятую оценку (5+5)
   await page.getByText("ДАЛЬШЕ").click();
-  await page.getByText("Тестовый вопрос №3?").waitFor({ timeout: 20000 });
+  await page.getByText("Исправленный вопрос №3?").waitFor({ timeout: 20000 });
   assert.ok(await page.getByText("#3/10").isVisible());
   assert.ok(await page.getByText("⭐ 10").isVisible(), "оценка-страховка не попала в сумму очков");
 
