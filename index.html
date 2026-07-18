@@ -37,7 +37,7 @@
 
     // ── Константы ──
 
-    const APP_VERSION = "1.3.1"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
+    const APP_VERSION = "1.4.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
@@ -499,6 +499,15 @@
       const topicQueueRef = useRef(null); // очередь тем без повторов
       const gameIdRef = useRef(0);        // защита от «гонки» между старой и новой игрой
 
+      // Выход на главную посреди игры: первый тап «взводит» кнопку (Выйти?),
+      // второй — выходит; через 3 с взвод сбрасывается (защита от случайного тапа)
+      const [exitArmed, setExitArmed] = useState(false);
+      const exitTimerRef = useRef(null);
+      useEffect(() => {
+        setExitArmed(false);
+        clearTimeout(exitTimerRef.current);
+      }, [screen]);
+
       const getTopicQueue = () => {
         if (!topicQueueRef.current) topicQueueRef.current = createTopicQueue(TOPICS);
         return topicQueueRef.current;
@@ -613,6 +622,34 @@
           setApiKeyError("Ключ не работает: " + (e.message || "ошибка соединения"));
         }
         setApiKeyTesting(false);
+      };
+
+      const goHome = () => {
+        gameIdRef.current++;
+        stopSpeaking();
+        prefetchRef.current = null;
+        clearTimeout(exitTimerRef.current);
+        setExitArmed(false);
+        setLoading(false);
+        setCurrentQ(null);
+        setEvaluation(null);
+        setQuestionNum(0);
+        setScores([]);
+        setTextInput("");
+        setTranscript("");
+        setErrorMsg("");
+        setNewRecord(false);
+        setScreen("start");
+      };
+
+      const armExit = () => {
+        if (exitArmed) {
+          goHome();
+          return;
+        }
+        setExitArmed(true);
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = setTimeout(() => setExitArmed(false), 3000);
       };
 
       const handleStart = () => {
@@ -777,6 +814,12 @@
           {screen === "playing" && (
             <div style={styles.playScreen}>
               <div style={styles.topBar}>
+                <button
+                  style={{ ...styles.homeBtn, ...(exitArmed ? styles.homeBtnArmed : {}) }}
+                  onClick={armExit}
+                >
+                  {exitArmed ? "Выйти?" : "🏠"}
+                </button>
                 <div style={styles.topBarItem}>#{questionNum}/{TOTAL_QUESTIONS}</div>
                 <div style={styles.topBarItem}>⭐ {totalScore}</div>
               </div>
@@ -874,6 +917,12 @@
               <button style={styles.btnPrimary} onClick={handleNext}>
                 {questionNum >= TOTAL_QUESTIONS ? "🏁 РЕЗУЛЬТАТЫ" : "➡ ДАЛЬШЕ"}
               </button>
+              <button
+                style={{ ...styles.btnSecondary, ...(exitArmed ? styles.btnSecondaryArmed : {}) }}
+                onClick={armExit}
+              >
+                {exitArmed ? "ТОЧНО ВЫЙТИ?" : "🏠 НА ГЛАВНУЮ"}
+              </button>
             </div>
           )}
 
@@ -911,6 +960,9 @@
                     )}
                     <button style={styles.btnPrimary} onClick={handleStart}>
                       🔄 ИГРАТЬ СНОВА
+                    </button>
+                    <button style={styles.btnSecondary} onClick={goHome}>
+                      🏠 НА ГЛАВНУЮ
                     </button>
                   </>
                 );
@@ -1099,6 +1151,25 @@
         width: "100%",
         maxWidth: 320,
       },
+      btnSecondary: {
+        background: "none",
+        color: "#8BC34A",
+        border: "2px solid rgba(139,195,74,0.4)",
+        borderRadius: 6,
+        padding: "10px 32px",
+        fontSize: 13,
+        fontWeight: 700,
+        fontFamily: pixelFont,
+        letterSpacing: 2,
+        cursor: "pointer",
+        width: "100%",
+        maxWidth: 320,
+        marginTop: 10,
+      },
+      btnSecondaryArmed: {
+        color: "#f44336",
+        border: "2px solid rgba(244,67,54,0.5)",
+      },
       btnSmall: {
         background: "rgba(139,195,74,0.15)",
         color: "#8BC34A",
@@ -1119,9 +1190,25 @@
       topBar: {
         display: "flex",
         justifyContent: "space-between",
+        alignItems: "center",
         padding: "14px 4px 10px",
         borderBottom: "2px solid rgba(139,195,74,0.2)",
         marginBottom: 12,
+      },
+      homeBtn: {
+        background: "none",
+        border: "1px solid rgba(139,195,74,0.35)",
+        borderRadius: 4,
+        color: "#8BC34A",
+        fontSize: 13,
+        fontFamily: pixelFont,
+        cursor: "pointer",
+        padding: "3px 8px",
+        letterSpacing: 1,
+      },
+      homeBtnArmed: {
+        border: "1px solid rgba(244,67,54,0.6)",
+        color: "#f44336",
       },
       topBarItem: {
         fontSize: 14,

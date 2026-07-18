@@ -185,9 +185,21 @@ async function scenarioWithApi(browser, base) {
   assert.ok(ev.messages[1].content.includes("вариант а; вариант б"));
   assert.ok(ev.messages[1].content.includes("Ответ игрока: тестовый ответ"));
 
+  // Навигация: выход на главную из игры через 🏠 с двухтаповым подтверждением
+  await page.getByText("🏠", { exact: true }).click();
+  await page.getByText("Выйти?").waitFor({ timeout: 5000 });
+  await page.getByText("Выйти?").click();
+  await page.getByText("НАЧАТЬ ИГРУ").waitFor({ timeout: 5000 });
+
+  // Новая игра после выхода стартует с чистого листа
+  await page.getByText("НАЧАТЬ ИГРУ").click();
+  await page.getByText(/Тестовый вопрос №\d+\?/).waitFor({ timeout: 20000 });
+  assert.ok(await page.getByText("#1/10").isVisible(), "после выхода новая игра не с 1-го вопроса");
+  assert.ok(await page.getByText("⭐ 0").isVisible(), "очки не обнулились после выхода");
+
   assert.deepStrictEqual(pageErrors, [], "ошибки на странице: " + pageErrors.join("; "));
   await context.close();
-  console.log("  ✓ генерация с темами, префетч, оценка с acceptable_answers — OK");
+  console.log("  ✓ генерация с темами, префетч, оценка с acceptable_answers, выход 🏠 — OK");
 }
 
 async function scenarioFallback(browser, base) {
@@ -227,10 +239,19 @@ async function scenarioFallback(browser, base) {
   await page.getByText("ДАЛЬШЕ").click();
   await page.getByText("Какой предмет нужен, чтобы добыть алмазную руду?").waitFor({ timeout: 20000 });
 
+  // Навигация с экрана результата: «НА ГЛАВНУЮ» с подтверждением
+  await page.locator('input[placeholder="...или напиши ответ"]').fill("железная кирка");
+  await page.getByText("✓ ОТВЕТИТЬ").click();
+  await page.getByText("5 из 5").waitFor({ timeout: 20000 });
+  await page.getByText("НА ГЛАВНУЮ").click();
+  await page.getByText("ТОЧНО ВЫЙТИ?").waitFor({ timeout: 5000 });
+  await page.getByText("ТОЧНО ВЫЙТИ?").click();
+  await page.getByText("НАЧАТЬ ИГРУ").waitFor({ timeout: 5000 });
+
   assert.strictEqual(apiRequests.length, 0, "без ключа не должно быть запросов к API, было: " + apiRequests.length);
   assert.deepStrictEqual(pageErrors, [], "ошибки на странице: " + pageErrors.join("; "));
   await context.close();
-  console.log("  ✓ fallback-банк, фильтр сложности, локальный скоринг, ноль запросов к API — OK");
+  console.log("  ✓ fallback-банк, фильтр сложности, локальный скоринг, выход с результата — OK");
 }
 
 async function main() {
