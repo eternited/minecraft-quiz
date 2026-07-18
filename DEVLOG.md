@@ -2,6 +2,26 @@
 
 Журнал разработки minecraft-quiz. Новые записи добавляются сверху.
 
+## 2026-07-18 — 2026-07-18.2: standalone-режим для старых iOS (iPhone 7)
+
+Жалоба: на iPhone 7 ярлык с экрана «Домой» открывался в Safari с адресной
+строкой, на iPhone 12 Pro — как полноценное приложение. Причина: у приложения
+не было ни manifest.json, ни apple-меты. Новые iOS (26+) открывают любой
+«Домой»-ярлык как веб-приложение по умолчанию, а iPhone 7 навсегда на iOS 15,
+где standalone требует явной декларации.
+
+- Добавлены `manifest.json` (display: standalone, относительные start_url/scope,
+  theme/background #1a1a2e) и легаси-мета Apple (apple-mobile-web-app-capable,
+  status-bar-style black, title) + `theme-color`.
+- Иконки: пиксельная морда крипера, `icon-180.png` (apple-touch-icon),
+  `icon-192/512.png` (manifest, 512 — maskable). Генератор —
+  `tests/gen-icons.js` (`npm run gen-icons`, рендер системным Chromium).
+- Юнит-тесты: валидность manifest (standalone, относительные пути, реальные
+  размеры PNG по IHDR), наличие всех тегов в index.html; mime .json/.png
+  в тестовом сервере.
+- На iPhone 7 после выкладки ярлык нужно удалить и добавить заново —
+  iOS фиксирует режим открытия в момент добавления.
+
 ## 2026-07-18 — 2026-07-18.1: самообновление PWA (перенос из «Таблицы умножения»)
 
 - В корень добавлена `update-mechanism-guide.md` — инструкция переноса

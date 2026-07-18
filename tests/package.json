@@ -5,7 +5,8 @@
   "scripts": {
     "test": "node unit.test.js && node e2e.test.js",
     "test:unit": "node unit.test.js",
-    "test:e2e": "node e2e.test.js"
+    "test:e2e": "node e2e.test.js",
+    "gen-icons": "node gen-icons.js"
   },
   "devDependencies": {
     "@babel/standalone": "^7.24.0",

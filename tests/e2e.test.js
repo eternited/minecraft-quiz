@@ -98,6 +98,8 @@ function startServer() {
         body = fs.readFileSync(full);
         type = full.endsWith(".html") ? "text/html; charset=utf-8"
           : full.endsWith(".js") ? "application/javascript; charset=utf-8"
+          : full.endsWith(".json") ? "application/json; charset=utf-8"
+          : full.endsWith(".png") ? "image/png"
           : "application/octet-stream";
       }
       const etag = '"' + crypto.createHash("sha1").update(body).digest("hex") + '"';

@@ -465,6 +465,32 @@ async function main() {
     assert.match(T.APP_VERSION, /^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
+  console.log("\nPWA-обвязка (manifest + apple-мета):");
+  test("manifest.json: standalone, относительные start_url/scope, иконки на месте", () => {
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+    assert.strictEqual(m.display, "standalone", "без display:standalone iOS 15 откроет ярлык в Safari");
+    assert.ok(m.start_url.startsWith("./") && m.scope.startsWith("./"), "start_url/scope должны быть относительными (Pages живёт в подкаталоге)");
+    assert.ok(Array.isArray(m.icons) && m.icons.length >= 2);
+    for (const ic of m.icons) {
+      const f = path.join(__dirname, "..", ic.src);
+      assert.ok(fs.existsSync(f), "нет файла иконки " + ic.src);
+      const px = parseInt(ic.sizes, 10);
+      const buf = fs.readFileSync(f);
+      assert.strictEqual(buf.readUInt32BE(16), px, ic.src + ": ширина PNG ≠ " + px);
+      assert.strictEqual(buf.readUInt32BE(20), px, ic.src + ": высота PNG ≠ " + px);
+    }
+  });
+  test("index.html: подключены manifest, apple-мета и apple-touch-icon (iOS 15 без них — просто закладка)", () => {
+    assert.ok(html.includes('rel="manifest"'), "нет <link rel=manifest>");
+    assert.ok(html.includes('name="apple-mobile-web-app-capable" content="yes"'), "нет apple-mobile-web-app-capable");
+    assert.ok(html.includes("apple-touch-icon"), "нет apple-touch-icon");
+    assert.ok(html.includes('name="theme-color"'), "нет theme-color");
+    const icon180 = path.join(__dirname, "..", "icon-180.png");
+    assert.ok(fs.existsSync(icon180), "нет icon-180.png");
+    const buf = fs.readFileSync(icon180);
+    assert.strictEqual(buf.readUInt32BE(16), 180);
+  });
+
   console.log("\nСамообновление — чистая логика:");
   test("normalizeEtag: срезает слабый префикс W/, пустое → null", () => {
     assert.strictEqual(T.normalizeEtag('W/"abc"'), '"abc"');

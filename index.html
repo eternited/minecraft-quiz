@@ -4,6 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Minecraft Викторина</title>
+  <!-- PWA: manifest достаточно для новых iOS/Android, apple-мета — для старых iOS
+       (iPhone 7 живёт на iOS 15: без них «Домой»-ярлык открывается просто в Safari) -->
+  <meta name="theme-color" content="#1a1a2e" />
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="Викторина" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -44,7 +53,7 @@
 
     // Формат версии: "ГГГГ-ММ-ДД.N" (дата выкладки + номер выкладки за день).
     // Перед каждым коммитом в master брать дату командой `date +%F` (не по памяти!).
-    const APP_VERSION = "2026-07-18.1";
+    const APP_VERSION = "2026-07-18.2";
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
