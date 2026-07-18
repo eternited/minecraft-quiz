@@ -172,6 +172,39 @@ async function main() {
     assert.ok(r.comment && r.correct_answer === "Крипер");
   });
 
+  console.log("\nСинонимы локализации и «страховка» оценки:");
+  test("«незерак» = «Адский камень» → 5 (кейс из жалобы)", () => {
+    const r = T.localScore("незерак", { correct_answer: "Адский камень", acceptable_answers: [] });
+    assert.strictEqual(r.score, 5);
+  });
+  test("«адский камень» = «Незерак» → 5 (обратное направление)", () => {
+    const r = T.localScore("адский камень", { correct_answer: "Незерак", acceptable_answers: [] });
+    assert.strictEqual(r.score, 5);
+  });
+  test("«эндерняк» = «Камень Края», «иссушитель» = «Визер» → 5", () => {
+    assert.strictEqual(T.localScore("эндерняк", { correct_answer: "Камень Края", acceptable_answers: [] }).score, 5);
+    assert.strictEqual(T.localScore("иссушитель", { correct_answer: "Визер", acceptable_answers: [] }).score, 5);
+  });
+  test("синонимы работают и через acceptable_answers", () => {
+    const q = { correct_answer: "Что-то другое", acceptable_answers: ["камень Края"] };
+    assert.strictEqual(T.localScore("эндерняк", q).score, 5);
+  });
+  test("несвязанные ответы синонимами не склеиваются", () => {
+    assert.strictEqual(T.localScore("незерак", { correct_answer: "Камень Края", acceptable_answers: [] }).score, 1);
+  });
+  test("MC_SYNONYMS: каждая группа ≥2 названий", () => {
+    assert.ok(T.MC_SYNONYMS.length >= 5);
+    for (const g of T.MC_SYNONYMS) assert.ok(Array.isArray(g) && g.length >= 2);
+  });
+  test("mergeEvaluations: локальная 5 бьёт судейскую 1; высокая судейская остаётся; без судьи — локальная", () => {
+    const local5 = { score: 5, comment: "Отлично!", correct_answer: "О" };
+    const judge1 = { score: 1, comment: "Не то", correct_answer: "О" };
+    const judge5 = { score: 5, comment: "Верно", correct_answer: "О" };
+    assert.strictEqual(T.mergeEvaluations(judge1, local5), local5);
+    assert.strictEqual(T.mergeEvaluations(judge5, { score: 4, comment: "x", correct_answer: "О" }), judge5);
+    assert.strictEqual(T.mergeEvaluations(null, local5), local5);
+  });
+
   console.log("\ncreateTopicQueue:");
   test("12 тем без повторов до исчерпания, потом новый цикл", () => {
     let s = 42;

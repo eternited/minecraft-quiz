@@ -117,7 +117,12 @@ async function scenarioWithApi(browser, base) {
       }
       if (sys.includes("судья")) {
         evalRequests.push(body);
-        return route.fulfill(aiChoice({ score: 5, comment: "Отлично, шахтёр!", correct_answer: "Ответ 1" }));
+        // «Несправедливый судья» для ответа «вариант а» — приложение обязано
+        // поднять оценку локальной проверкой (ответ есть в acceptable_answers)
+        const unfair = body.messages[1].content.includes("Ответ игрока: вариант а");
+        return route.fulfill(aiChoice(unfair
+          ? { score: 1, comment: "Это не то!", correct_answer: "Ответ 2" }
+          : { score: 5, comment: "Отлично, шахтёр!", correct_answer: "Ответ 1" }));
       }
       return route.fulfill(aiChoice("ок"));
     }
@@ -172,7 +177,20 @@ async function scenarioWithApi(browser, base) {
   assert.ok(await page.getByText("#2/10").isVisible());
   assert.ok(await page.getByText("⭐ 5").isVisible(), "очки не начислены");
 
-  await page.waitForTimeout(500); // даём уйти префетчу вопроса 3
+  // «Несправедливый судья»: ответ «вариант а» есть в acceptable_answers,
+  // мок-судья ставит 1 — локальная «страховка» обязана поднять до 5
+  await page.locator('input[placeholder="...или напиши ответ"]').fill("вариант а");
+  await page.getByText("✓ ОТВЕТИТЬ").click();
+  await page.getByText("5 из 5").waitFor({ timeout: 20000 });
+  assert.ok(await page.getByText("Отлично!").isVisible(), "после апгрейда нет локального комментария");
+
+  // Вопрос 3: сумма очков должна учесть поднятую оценку (5+5)
+  await page.getByText("ДАЛЬШЕ").click();
+  await page.getByText("Тестовый вопрос №3?").waitFor({ timeout: 20000 });
+  assert.ok(await page.getByText("#3/10").isVisible());
+  assert.ok(await page.getByText("⭐ 10").isVisible(), "оценка-страховка не попала в сумму очков");
+
+  await page.waitForTimeout(500); // даём уйти префетчу следующего вопроса
 
   // Проверки запросов генерации
   assert.ok(genRequests.length >= 2, "префетч не сработал: запросов генерации " + genRequests.length);
@@ -197,13 +215,14 @@ async function scenarioWithApi(browser, base) {
   }
   assert.ok(verifyRequests[0].messages[1].content.includes("Тестовый вопрос №1?"), "факт-чек проверяет не тот вопрос");
 
-  // Проверки запроса оценки (acceptable_answers дополнены факт-чеком)
-  assert.strictEqual(evalRequests.length, 1, "ожидали 1 запрос оценки");
+  // Проверки запросов оценки (acceptable_answers дополнены факт-чеком)
+  assert.strictEqual(evalRequests.length, 2, "ожидали 2 запроса оценки");
   const ev = evalRequests[0];
   assert.strictEqual(ev.temperature, 0.2, "temperature оценки ≠ 0.2");
   assert.ok(ev.messages[1].content.includes("Допустимые варианты ответа"), "судье не передали acceptable_answers");
   assert.ok(ev.messages[1].content.includes("вариант а; вариант б; проверенный вариант"), "варианты факт-чека не домержились");
   assert.ok(ev.messages[1].content.includes("Ответ игрока: тестовый ответ"));
+  assert.ok(evalRequests[1].messages[1].content.includes("Ответ игрока: вариант а"));
 
   // Навигация: выход на главную из игры через 🏠 с двухтаповым подтверждением
   await page.getByText("🏠", { exact: true }).click();

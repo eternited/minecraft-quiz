@@ -33,7 +33,7 @@
 
     // ── Константы ──
 
-    const APP_VERSION = "1.5.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
+    const APP_VERSION = "1.6.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
@@ -274,7 +274,22 @@
       };
     }
 
-    // ── Локальная оценка (fallback без API) ──
+    // ── Локальная оценка (fallback и «страховка» от несправедливого судьи) ──
+
+    // Группы названий одного и того же объекта: официальное, старое из прежней
+    // локализации, разговорное. Расхождение имён не должно стоить игроку баллов
+    // (кейс: эталон «Адский камень», ответ «незерак» — это один блок).
+    const MC_SYNONYMS = [
+      ["незерак", "адский камень", "камень нижнего мира", "netherrack"],
+      ["камень края", "эндерняк", "end stone", "эндстоун"],
+      ["нижний мир", "незер", "ад", "nether"],
+      ["край", "энд", "the end"],
+      ["иссушитель", "визер", "wither"],
+      ["зомбифицированный пиглин", "зомби-пиглин", "свинозомби"],
+      ["око края", "глаз эндера", "око эндера"],
+      ["жемчуг края", "эндер-жемчуг", "жемчуг эндера"],
+      ["шалкер", "шулкер"],
+    ];
 
     function localScore(playerAnswer, q) {
       const norm = (s) => String(s).toLowerCase()
@@ -292,11 +307,19 @@
       const pa = norm(playerAnswer);
       const paWords = pa.split(" ").filter(Boolean);
       const paSig = significant(paWords);
-      const refs = [q.correct_answer, ...(q.acceptable_answers || [])];
-      let best = 1;
-      for (const ref of refs) {
+      // эталоны + расширение группами синонимов локализации
+      const refSet = new Set();
+      for (const ref of [q.correct_answer, ...(q.acceptable_answers || [])]) {
         const ca = norm(ref);
         if (!ca) continue;
+        refSet.add(ca);
+        for (const group of MC_SYNONYMS) {
+          const g = group.map(norm);
+          if (g.includes(ca)) g.forEach((x) => refSet.add(x));
+        }
+      }
+      let best = 1;
+      for (const ca of refSet) {
         let s = 1;
         if (pa === ca) s = 5;
         else {
@@ -319,6 +342,15 @@
         comment: best >= 4 ? "Отлично!" : best >= 3 ? "Почти!" : "Не совсем...",
         correct_answer: q.correct_answer,
       };
+    }
+
+    // «Страховка» от несправедливого судьи: итог — лучшая из двух оценок.
+    // Если AI занизил, а локальная проверка видит совпадение (в т.ч. через
+    // синонимы локализации) — берём локальную.
+    function mergeEvaluations(judgeEv, localEv) {
+      if (!judgeEv) return localEv;
+      if (localEv && localEv.score > judgeEv.score) return localEv;
+      return judgeEv;
     }
 
     // ── История результатов ──
@@ -655,7 +687,7 @@
             ev = null;
           }
         }
-        if (!ev) ev = localScore(answer, currentQ);
+        ev = mergeEvaluations(ev, localScore(answer, currentQ));
         if (gameId !== gameIdRef.current) return;
         setEvaluation(ev);
         setScores((prev) => [...prev, ev.score]);
@@ -1526,6 +1558,7 @@
       VERIFY_SYSTEM_PROMPT, VERIFY_TEMPERATURE, buildVerifyUserPrompt, applyVerification,
       callAI, parseJSON, buildQuestionUserPrompt, buildEvalUserPrompt,
       normalizeQuestion, pickFallbackQuestion, createTopicQueue, localScore,
+      MC_SYNONYMS, mergeEvaluations,
       correctMinecraftTerms, MC_CORRECTIONS, RAW_CORRECTIONS,
       loadHistory, saveGameResult, bestTotal,
     };
