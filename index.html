@@ -21,6 +21,7 @@
 
     // ── Константы ──
 
+    const APP_VERSION = "1.3.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
@@ -658,6 +659,7 @@
       return (
         <div style={styles.container}>
           <div style={styles.scanlines} />
+          <div style={styles.versionTag}>v{APP_VERSION}</div>
 
           {/* ── START ── */}
           {screen === "start" && (
@@ -915,6 +917,17 @@
         pointerEvents: "none",
         background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px)",
         zIndex: 100,
+      },
+      versionTag: {
+        position: "fixed",
+        bottom: 6,
+        right: 8,
+        fontSize: 10,
+        color: "rgba(255,255,255,0.35)",
+        fontFamily: pixelFont,
+        letterSpacing: 1,
+        pointerEvents: "none",
+        zIndex: 101,
       },
       centered: {
         display: "flex",
@@ -1347,6 +1360,7 @@
 
     // Хук для тестов: доступ к чистой логике без рендера (в проде безвреден)
     window.__MCQUIZ_TEST__ = {
+      APP_VERSION,
       TOTAL_QUESTIONS, API_URL, MODEL, GEN_TEMPERATURE, EVAL_TEMPERATURE, API_TIMEOUT_MS,
       TOPICS, FALLBACK_QUESTIONS, QUESTION_EXAMPLES, QUESTION_SYSTEM_PROMPT, EVAL_SYSTEM_PROMPT,
       callAI, parseJSON, buildQuestionUserPrompt, buildEvalUserPrompt,

@@ -330,6 +330,11 @@ async function main() {
     assert.strictEqual(T.API_TIMEOUT_MS, 15000);
   });
 
+  console.log("\nВерсия приложения:");
+  test("APP_VERSION задана в формате semver", () => {
+    assert.match(T.APP_VERSION, /^\d+\.\d+\.\d+$/);
+  });
+
   console.log("\nИстория результатов:");
   test("save/load: новые сверху, лимит 20, bestTotal", () => {
     for (let i = 1; i <= 25; i++) {

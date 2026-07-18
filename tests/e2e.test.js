@@ -124,12 +124,19 @@ async function scenarioWithApi(browser, base) {
 
   await page.goto(base);
   await page.getByText("DeepSeek API-ключ сохранён").waitFor({ timeout: 20000 });
+
+  // Бейдж версии виден и совпадает с APP_VERSION
+  const appVersion = await page.evaluate(() => window.__MCQUIZ_TEST__.APP_VERSION);
+  assert.match(appVersion, /^\d+\.\d+\.\d+$/, "APP_VERSION не semver");
+  assert.ok(await page.getByText("v" + appVersion, { exact: true }).isVisible(), "нет бейджа версии на старте");
+
   await page.getByText("НАЧАТЬ ИГРУ").click();
 
   // Вопрос 1 сгенерирован через API
   await page.getByText("Тестовый вопрос №1?").waitFor({ timeout: 20000 });
   assert.ok(await page.getByText("#1/10").isVisible(), "нет счётчика вопросов");
   assert.ok(await page.getByText("Прочитать вопрос").isVisible(), "нет кнопки озвучки");
+  assert.ok(await page.getByText("v" + appVersion, { exact: true }).isVisible(), "бейдж версии пропал в игре");
 
   // Единый ввод: текст попадает в блок «Твой ответ»
   await page.locator('input[placeholder="...или напиши ответ"]').fill("тестовый ответ");
