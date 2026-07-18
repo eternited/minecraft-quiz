@@ -1,0 +1,16 @@
+{
+  "name": "minecraft-quiz-tests",
+  "private": true,
+  "description": "Тесты для minecraft-quiz: unit (Node VM + Babel) и e2e (playwright-core + системный Chromium)",
+  "scripts": {
+    "test": "node unit.test.js && node e2e.test.js",
+    "test:unit": "node unit.test.js",
+    "test:e2e": "node e2e.test.js"
+  },
+  "devDependencies": {
+    "@babel/standalone": "^7.24.0",
+    "playwright-core": "^1.44.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

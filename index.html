@@ -19,55 +19,282 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
-    const FALLBACK_QUESTIONS = [
-      { question: "Из каких блоков делается верстак?", correct_answer: "Из четырёх досок", difficulty: "easy" },
-      { question: "Какой моб появляется, если молния ударит в свинью?", correct_answer: "Зомбифицированный пиглин", difficulty: "hard" },
-      { question: "Сколько блоков обсидиана нужно для портала в Нижний мир?", correct_answer: "Минимум 10 блоков", difficulty: "medium" },
-      { question: "Какой предмет нужен, чтобы добыть алмазную руду?", correct_answer: "Железная кирка или лучше", difficulty: "easy" },
-      { question: "Как называется босс, обитающий в Энде?", correct_answer: "Дракон Края (Эндер-дракон)", difficulty: "easy" },
-      { question: "Какой блок используется для зачарования предметов?", correct_answer: "Стол зачарований", difficulty: "easy" },
-      { question: "Из чего крафтится око Края?", correct_answer: "Из жемчуга Края и огненного порошка", difficulty: "medium" },
-      { question: "Какой моб боится воды и телепортируется?", correct_answer: "Эндермен", difficulty: "easy" },
-      { question: "Сколько уровней опыта стоит максимальное зачарование?", correct_answer: "30 уровней", difficulty: "hard" },
-      { question: "Какой биом содержит грибных коров?", correct_answer: "Грибной остров (Mushroom Fields)", difficulty: "medium" },
-      { question: "Что выпадает с Визера после убийства?", correct_answer: "Звезда Нижнего мира", difficulty: "medium" },
-      { question: "Какой блок нельзя сдвинуть поршнем?", correct_answer: "Обсидиан", difficulty: "medium" },
-      { question: "Как приручить волка в Minecraft?", correct_answer: "Дать ему кость", difficulty: "easy" },
-      { question: "Какой редстоун-компонент даёт сигнал при наступании на него?", correct_answer: "Нажимная пластина", difficulty: "medium" },
-      { question: "Сколько голов скелетов-визеров нужно для призыва Визера?", correct_answer: "Три головы", difficulty: "hard" },
-    ];
+    // ── Константы ──
 
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
+    const GEN_TEMPERATURE = 0.7;
+    const EVAL_TEMPERATURE = 0.2;
+    const API_TIMEOUT_MS = 15000;
+    const API_KEY_STORAGE = "mc_quiz_api_key";
+    const TTS_STORAGE = "mc_quiz_tts";
+    const HISTORY_STORAGE = "mc_quiz_history";
+    const HISTORY_LIMIT = 20;
 
-    async function callClaude(apiKey, systemPrompt, userPrompt) {
-      const resp = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + apiKey,
-        },
-        body: JSON.stringify({
+    const TOPICS = [
+      "крафт и рецепты",
+      "мобы и их поведение",
+      "редстоун",
+      "зельеварение",
+      "зачарования",
+      "биомы и структуры",
+      "Нижний мир",
+      "Край",
+      "еда и фермерство",
+      "инструменты и броня",
+      "деревни и жители",
+      "игровые механики",
+    ];
+
+    const FALLBACK_QUESTIONS = [
+      { question: "Из каких блоков делается верстак?", correct_answer: "Из четырёх досок", acceptable_answers: ["четыре доски", "4 доски", "доски"], difficulty: "easy" },
+      { question: "Какой моб появляется, если молния ударит в свинью?", correct_answer: "Зомбифицированный пиглин", acceptable_answers: ["зомбифицированный пиглин", "зомби-пиглин", "свинозомби"], difficulty: "hard" },
+      { question: "Сколько блоков обсидиана нужно для портала в Нижний мир?", correct_answer: "Минимум 10 блоков", acceptable_answers: ["10", "минимум 10", "десять"], difficulty: "medium" },
+      { question: "Какой предмет нужен, чтобы добыть алмазную руду?", correct_answer: "Железная кирка или лучше", acceptable_answers: ["железная кирка", "алмазная кирка", "незеритовая кирка"], difficulty: "easy" },
+      { question: "Как называется босс, обитающий в Энде?", correct_answer: "Дракон Края (Эндер-дракон)", acceptable_answers: ["дракон края", "эндер-дракон", "дракон"], difficulty: "easy" },
+      { question: "Какой блок используется для зачарования предметов?", correct_answer: "Стол зачарований", acceptable_answers: ["стол зачарований", "зачаровательный стол"], difficulty: "easy" },
+      { question: "Из чего крафтится око Края?", correct_answer: "Из жемчуга Края и огненного порошка", acceptable_answers: ["жемчуг края и огненный порошок", "эндер-жемчуг и огненный порошок"], difficulty: "medium" },
+      { question: "Какой моб боится воды и телепортируется?", correct_answer: "Эндермен", acceptable_answers: ["эндермен", "эндер"], difficulty: "easy" },
+      { question: "Сколько уровней опыта стоит максимальное зачарование?", correct_answer: "30 уровней", acceptable_answers: ["30", "тридцать", "30 уровней"], difficulty: "hard" },
+      { question: "Какой биом содержит грибных коров?", correct_answer: "Грибной остров (Mushroom Fields)", acceptable_answers: ["грибной остров", "грибные поля", "грибной биом"], difficulty: "medium" },
+      { question: "Что выпадает с Визера после убийства?", correct_answer: "Звезда Нижнего мира", acceptable_answers: ["звезда нижнего мира", "незер-звезда", "звезда ада"], difficulty: "medium" },
+      { question: "Какой блок нельзя сдвинуть поршнем?", correct_answer: "Обсидиан", acceptable_answers: ["обсидиан", "обсидиановый блок"], difficulty: "medium" },
+      { question: "Как приручить волка в Minecraft?", correct_answer: "Дать ему кость", acceptable_answers: ["кость", "кости", "дать кость"], difficulty: "easy" },
+      { question: "Какой редстоун-компонент даёт сигнал при наступании на него?", correct_answer: "Нажимная пластина", acceptable_answers: ["нажимная пластина", "нажимная плита", "плита"], difficulty: "medium" },
+      { question: "Сколько голов скелетов-визеров нужно для призыва Визера?", correct_answer: "Три головы", acceptable_answers: ["3", "три", "три головы"], difficulty: "hard" },
+    ];
+
+    // ── Вызов API (DeepSeek) ──
+
+    async function callAI(apiKey, systemPrompt, userPrompt, opts = {}) {
+      const { temperature = GEN_TEMPERATURE, timeoutMs = API_TIMEOUT_MS, json = true } = opts;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const body = {
           model: MODEL,
           max_tokens: 1000,
+          temperature,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-        }),
-      });
-      if (!resp.ok) throw new Error("API error " + resp.status);
-      const data = await resp.json();
-      return data.choices[0].message.content;
+        };
+        if (json) body.response_format = { type: "json_object" };
+        const resp = await fetch(API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error("API error " + resp.status);
+        const data = await resp.json();
+        return data.choices[0].message.content;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     function parseJSON(raw) {
       const cleaned = raw.replace(/```json|```/g, "").trim();
-      return JSON.parse(cleaned);
+      try {
+        return JSON.parse(cleaned);
+      } catch (e) {
+        const start = cleaned.indexOf("{");
+        const end = cleaned.lastIndexOf("}");
+        if (start !== -1 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+        throw e;
+      }
     }
 
-    // ── Icons ──
+    // ── Промпты ──
+
+    const QUESTION_EXAMPLES = [
+      { question: "Какой моб взрывается, подкравшись к игроку?", correct_answer: "Крипер", acceptable_answers: ["крипер", "криппер"], difficulty: "easy" },
+      { question: "Из какого блока добывается редстоун?", correct_answer: "Из редстоуновой руды", acceptable_answers: ["редстоуновая руда", "руда редстоуна", "красная руда"], difficulty: "easy" },
+      { question: "Что нужно добавить к арбузу в верстаке, чтобы получить сверкающий арбуз?", correct_answer: "Золотые самородки (восемь штук)", acceptable_answers: ["золотые самородки", "золотой самородок", "8 золотых самородков"], difficulty: "medium" },
+      { question: "Сколько единиц железа нужно на полный комплект железной брони?", correct_answer: "24 слитка", acceptable_answers: ["24", "двадцать четыре", "24 слитка"], difficulty: "medium" },
+      { question: "Какое зелье варится из паучьего глаза?", correct_answer: "Зелье отравления", acceptable_answers: ["зелье отравления", "отравление", "зелье яда"], difficulty: "medium" },
+      { question: "Какой предмет нужно держать в руке, чтобы эндермен не нападал, когда на него смотришь?", correct_answer: "Никакой — эндермен нападает от взгляда в любом случае; безопасно смотреть можно, только надев на голову тыкву", acceptable_answers: ["никакой", "никакой не поможет", "тыква на голове", "резная тыква"], difficulty: "hard" },
+    ];
+
+    const QUESTION_SYSTEM_PROMPT = [
+      "Ты — составитель вопросов для викторины по Minecraft (Java Edition).",
+      "",
+      "Жёсткие требования:",
+      "- Вопрос — только о реальной механике, предмете, мобе, блоке или структуре игры, которые можно проверить по Minecraft Wiki. Ничего не выдумывай.",
+      "- Ответ должен быть коротким и однозначным.",
+      "- Используй официальную русскую локализацию терминов: Нижний мир, Край, крипер, эндермен, редстоун.",
+      "- Перед выводом проверь себя: убедись, что вопрос относится к реальной игре и на него существует один общепризнанный ответ.",
+      "",
+      'Отвечай ТОЛЬКО валидным JSON без markdown и пояснений. Формат: {"question":"...","correct_answer":"...","acceptable_answers":["...","..."],"difficulty":"easy|medium|hard"}',
+      "Поле acceptable_answers — массив из 2–4 допустимых вариантов ответа: синонимы и разговорные названия.",
+      "",
+      "Примеры хороших вопросов:",
+      ...QUESTION_EXAMPLES.map((ex) => JSON.stringify(ex)),
+    ].join("\n");
+
+    const DIFFICULTY_PROMPT = {
+      mixed: "любая — сам выбери easy, medium или hard",
+      easy: "строго easy (простой вопрос)",
+      medium: "строго medium (средний вопрос)",
+      hard: "строго hard (сложный вопрос)",
+    };
+
+    function buildQuestionUserPrompt(topic, history, difficulty) {
+      const hist = (history || []).map((q) => "- " + q).join("\n");
+      return [
+        "Придумай один вопрос для викторины по Minecraft на русском языке.",
+        "Тема вопроса: " + topic + ".",
+        "Сложность: " + (DIFFICULTY_PROMPT[difficulty] || DIFFICULTY_PROMPT.mixed) + ".",
+        "",
+        "Уже заданные вопросы (НЕ повторяй их и не делай похожие):",
+        hist || "пока нет",
+        "",
+        "Верни JSON.",
+      ].join("\n");
+    }
+
+    const EVAL_SYSTEM_PROMPT = 'Ты — судья викторины по Minecraft (Java Edition). Оцени ответ игрока по 5-балльной шкале. Игрок отвечает голосом, поэтому прощай опечатки, огрехи распознавания речи и разговорные формулировки. Отвечай ТОЛЬКО валидным JSON без markdown. Формат: {"score":число_от_1_до_5,"comment":"краткий дружелюбный комментарий на русском","correct_answer":"полный правильный ответ"}';
+
+    function buildEvalUserPrompt(q, playerAnswer) {
+      const lines = [
+        "Вопрос: " + q.question,
+        "Правильный ответ: " + q.correct_answer,
+      ];
+      if (q.acceptable_answers && q.acceptable_answers.length) {
+        lines.push("Допустимые варианты ответа (синонимы и разговорные названия — засчитывай их как верные): " + q.acceptable_answers.join("; "));
+      }
+      lines.push(
+        "Ответ игрока: " + playerAnswer,
+        "",
+        "Шкала: 5 = верно или совпадает по смыслу с любым допустимым вариантом, 4 = по сути верно, но неточно, 3 = частично верно, 2 = слабо, но что-то угадал, 1 = неверно. Дай короткий дружелюбный комментарий в стиле Minecraft."
+      );
+      return lines.join("\n");
+    }
+
+    // ── Утилиты вопросов ──
+
+    function normalizeQuestion(raw) {
+      if (!raw || typeof raw !== "object") return null;
+      const question = typeof raw.question === "string" ? raw.question.trim() : "";
+      const correct = typeof raw.correct_answer === "string" ? raw.correct_answer.trim() : "";
+      if (!question || !correct) return null;
+      const difficulty = ["easy", "medium", "hard"].includes(raw.difficulty) ? raw.difficulty : "medium";
+      const acceptable = Array.isArray(raw.acceptable_answers)
+        ? raw.acceptable_answers
+            .filter((a) => typeof a === "string" && a.trim())
+            .map((a) => a.trim())
+            .slice(0, 6)
+        : [];
+      return { question, correct_answer: correct, difficulty, acceptable_answers: acceptable };
+    }
+
+    function pickFallbackQuestion(idx, difficulty) {
+      const filtered = difficulty && difficulty !== "mixed"
+        ? FALLBACK_QUESTIONS.filter((q) => q.difficulty === difficulty)
+        : FALLBACK_QUESTIONS;
+      const bank = filtered.length ? filtered : FALLBACK_QUESTIONS;
+      return bank[idx % bank.length];
+    }
+
+    function createTopicQueue(topics, rng = Math.random) {
+      let pool = [];
+      return {
+        next() {
+          if (!pool.length) {
+            pool = topics.slice();
+            for (let i = pool.length - 1; i > 0; i--) {
+              const j = Math.floor(rng() * (i + 1));
+              [pool[i], pool[j]] = [pool[j], pool[i]];
+            }
+          }
+          return pool.pop();
+        },
+        reset() { pool = []; },
+      };
+    }
+
+    // ── Локальная оценка (fallback без API) ──
+
+    function localScore(playerAnswer, q) {
+      const norm = (s) => String(s).toLowerCase()
+        .replace(/ё/g, "е")
+        .replace(/[^а-яa-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const stem = (w) => (w.length > 3 ? w.slice(0, Math.max(3, w.length - 2)) : w);
+      const wordMatches = (pw, w) => {
+        if (/^\d+$/.test(w) || /^\d+$/.test(pw)) return pw === w;
+        return pw.startsWith(stem(w)) || w.startsWith(stem(pw));
+      };
+      const pa = norm(playerAnswer);
+      const paWords = pa.split(" ").filter(Boolean);
+      const refs = [q.correct_answer, ...(q.acceptable_answers || [])];
+      let best = 1;
+      for (const ref of refs) {
+        const ca = norm(ref);
+        if (!ca) continue;
+        let s = 1;
+        if (pa === ca) s = 5;
+        else {
+          // значимые слова: длиннее 2 букв, а числа — любой длины
+          const words = ca.split(" ").filter((w) => w.length > 2 || /^\d+$/.test(w));
+          if (words.length && words.every((w) => paWords.some((pw) => wordMatches(pw, w)))) s = 4;
+          else if (words.some((w) => paWords.some((pw) => wordMatches(pw, w)))) s = 3;
+        }
+        if (s > best) best = s;
+        if (best === 5) break;
+      }
+      return {
+        score: best,
+        comment: best >= 4 ? "Отлично!" : best >= 3 ? "Почти!" : "Не совсем...",
+        correct_answer: q.correct_answer,
+      };
+    }
+
+    // ── История результатов ──
+
+    function loadHistory() {
+      try {
+        const h = JSON.parse(localStorage.getItem(HISTORY_STORAGE) || "[]");
+        return Array.isArray(h) ? h : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveGameResult(entry) {
+      const h = [entry, ...loadHistory()].slice(0, HISTORY_LIMIT);
+      try { localStorage.setItem(HISTORY_STORAGE, JSON.stringify(h)); } catch (e) {}
+      return h;
+    }
+
+    function bestTotal(history) {
+      return history.reduce((m, g) => Math.max(m, g.total || 0), 0);
+    }
+
+    // ── Озвучка (SpeechSynthesis) ──
+
+    function speak(text) {
+      if (!window.speechSynthesis || !text) return;
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "ru-RU";
+        speechSynthesis.speak(u);
+      } catch (e) {}
+    }
+
+    function stopSpeaking() {
+      try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {}
+    }
+
+    // ── Иконки ──
 
     function MicIcon({ active }) {
       return (
@@ -101,62 +328,62 @@
       );
     }
 
-    // ── Minecraft term correction ──
-    // Русский ASR часто искажает игровую терминологию — исправляем фонетически близкие варианты
+    // ── Коррекция Minecraft-терминов ──
+    // Русский ASR часто искажает игровую терминологию — исправляем фонетически близкие варианты.
+    // ВАЖНО: \b в JS-регулярках не работает с кириллицей (она не входит в \w),
+    // поэтому границы слов строим вручную через [^а-яёa-z0-9].
 
-    const MC_CORRECTIONS = [
-      [/\bэнд[эе]р\b/gi, "эндер"],
-      [/\bендер\b/gi, "эндер"],
-      [/\bэндермэн\b/gi, "эндермен"],
-      [/\bэндермэна?\b/gi, "эндермена"],
-      [/\bкрипп?ер\b/gi, "крипер"],
-      [/\bви[зс]ер\b/gi, "визер"],
-      [/\bвай[зс]ер\b/gi, "визер"],
-      [/\bпиглен\b/gi, "пиглин"],
-      [/\bпигл[иы]н\b/gi, "пиглин"],
-      [/\bпик[лн]\s*ин\b/gi, "пиглин"],
-      [/\bр[эе]д\s*стон\b/gi, "редстоун"],
-      [/\bр[эе]дстоун\b/gi, "редстоун"],
-      [/\bред\s*стоун\b/gi, "редстоун"],
-      [/\bобс[иы]д[иы]ан\b/gi, "обсидиан"],
-      [/\bапс[иы]д[иы]ан\b/gi, "обсидиан"],
-      [/\bопс[иы]д[иы]ан\b/gi, "обсидиан"],
-      [/\bнотш\b/gi, "нотч"],
-      [/\bноч\b/gi, "нотч"],
-      [/\bкрафт[иы]нг\b/gi, "крафтинг"],
-      [/\bкрафтить\b/gi, "крафтить"],
-      [/\bзомб[иы]фиц[иы]рованный\b/gi, "зомбифицированный"],
-      [/\bзомб[иы]фицированн?ый\b/gi, "зомбифицированный"],
-      [/\bзомб[иы]пиглин\b/gi, "зомбифицированный пиглин"],
-      [/\bне[зс]ер[иы]т\b/gi, "незерит"],
-      [/\bнез[еэ]р[иы]т\b/gi, "незерит"],
-      [/\bне[зс]ер\b/gi, "незер"],
-      [/\bниж[нь]+[иы][йй]\s*мир\b/gi, "нижний мир"],
-      [/\bнижн[ий]+\s*мир\b/gi, "нижний мир"],
-      [/\bзач[аа]рован[ие]+\b/gi, "зачарование"],
-      [/\bзач[аа]ровывание\b/gi, "зачарование"],
-      [/\bспаун\b/gi, "спавн"],
-      [/\bспав[нм]\b/gi, "спавн"],
-      [/\bкрафт\s*верстак\b/gi, "верстак"],
-      [/\bфарм[иы]нг\b/gi, "фарминг"],
-      [/\bг[рл][иы]фер\b/gi, "грифер"],
-      [/\bтекстур\s*пак\b/gi, "текстурпак"],
-      [/\bшулк[еэ]р\b/gi, "шалкер"],
-      [/\bшалк[еэ]р\b/gi, "шалкер"],
-      [/\bиллюз[ои]р\b/gi, "иллюзор"],
-      [/\bпри[зс]рак\b/gi, "фантом"],
-      [/\bфантом\b/gi, "фантом"],
-      [/\bч[уе]д[иы]ще\b/gi, "чудище"],
-      [/\bблейз\b/gi, "блейз"],
-      [/\bбл[еэ][йи][зс]\b/gi, "блейз"],
-      [/\bгаст\b/gi, "гаст"],
-      [/\bга[зс]т\b/gi, "гаст"],
-      [/\bслайм\b/gi, "слайм"],
-      [/\bсла[йи]м\b/gi, "слайм"],
-      [/\bгол[еэ]м\b/gi, "голем"],
-      [/\bкрай\b/gi, "край"],
-      [/\bэнд\b/gi, "энд"],
+    const RAW_CORRECTIONS = [
+      ["энд[эе]р", "эндер"],
+      ["ендер", "эндер"],
+      ["эндермэн", "эндермен"],
+      ["эндермэна", "эндермена"],
+      ["крипп?ер", "крипер"],
+      ["ви[зс]ер", "визер"],
+      ["вай[зс]ер", "визер"],
+      ["пиглен", "пиглин"],
+      ["пигл[иы]н", "пиглин"],
+      ["пик[лн]\\s*ин", "пиглин"],
+      ["р[иэе]д\\s*стон", "редстоун"],
+      ["р[иэе]дстоун", "редстоун"],
+      ["ред\\s*стоун", "редстоун"],
+      ["обс[иы]д[иы]ан", "обсидиан"],
+      ["апс[иы]д[иы]ан", "обсидиан"],
+      ["опс[иы]д[иы]ан", "обсидиан"],
+      ["нотш", "нотч"],
+      ["ноч", "нотч"],
+      ["крафт[иы]нг", "крафтинг"],
+      ["зомб[иы]фиц[иы]рованный", "зомбифицированный"],
+      ["зомб[иы]фицированн?ый", "зомбифицированный"],
+      ["зомб[иы]пиглин", "зомбифицированный пиглин"],
+      ["не[зс]ер[иы]т", "незерит"],
+      ["нез[еэ]р[иы]т", "незерит"],
+      ["не[зс]ер", "незер"],
+      ["ниж[нь]+[иы]й\\s*мир", "нижний мир"],
+      ["нижн[ий]+\\s*мир", "нижний мир"],
+      ["зачарован[ие]+", "зачарование"],
+      ["зачаровывание", "зачарование"],
+      ["спаун", "спавн"],
+      ["спавм", "спавн"],
+      ["крафт\\s*верстак", "верстак"],
+      ["фарм[иы]нг", "фарминг"],
+      ["г[рл][иы]фер", "грифер"],
+      ["текстур\\s*пак", "текстурпак"],
+      ["шулк[еэ]р", "шалкер"],
+      ["шалк[еэ]р", "шалкер"],
+      ["иллюз[ои]р", "иллюзор"],
+      ["ч[уе]д[иы]ще", "чудище"],
+      ["бл[еэ][йи][зс]", "блейз"],
+      ["га[зс]т", "гаст"],
+      ["сла[йи]м", "слайм"],
+      ["гол[еэ]м", "голем"],
     ];
+
+    const WORD_BOUND = "[^а-яёa-z0-9]";
+    const MC_CORRECTIONS = RAW_CORRECTIONS.map(([pattern, replacement]) => [
+      new RegExp("(^|" + WORD_BOUND + ")(?:" + pattern + ")(?=" + WORD_BOUND + "|$)", "gi"),
+      (m, p1) => p1 + replacement,
+    ]);
 
     function correctMinecraftTerms(text) {
       let result = text;
@@ -166,7 +393,7 @@
       return result;
     }
 
-    // ── Speech Recognition Hook ──
+    // ── Распознавание речи ──
 
     function useSpeechRecognition() {
       const [supported, setSupported] = useState(false);
@@ -194,25 +421,29 @@
       }, []);
 
       const start = useCallback(() => {
-        if (recogRef.current) {
-          setTranscript("");
+        const r = recogRef.current;
+        if (!r) return;
+        setTranscript("");
+        try {
+          r.start();
           setListening(true);
-          recogRef.current.start();
+        } catch (e) {
+          // InvalidStateError: распознавание уже запущено — игнорируем
         }
       }, []);
 
       const stop = useCallback(() => {
-        if (recogRef.current) recogRef.current.stop();
+        try { recogRef.current && recogRef.current.stop(); } catch (e) {}
       }, []);
 
       return { supported, listening, transcript, start, stop, setTranscript };
     }
 
-    // ── Main App ──
+    // ── Приложение ──
 
     function MinecraftQuiz() {
       const [screen, setScreen] = useState("start");
-      const [apiKey, setApiKey] = useState(() => localStorage.getItem("mc_quiz_api_key") || "");
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem(API_KEY_STORAGE) || "");
       const [apiKeyInput, setApiKeyInput] = useState("");
       const [apiKeyError, setApiKeyError] = useState("");
       const [apiKeyTesting, setApiKeyTesting] = useState(false);
@@ -222,11 +453,30 @@
       const [evaluation, setEvaluation] = useState(null);
       const [loading, setLoading] = useState(false);
       const [loadingMsg, setLoadingMsg] = useState("");
-      const [askedQuestions, setAskedQuestions] = useState([]);
       const [textInput, setTextInput] = useState("");
       const [errorMsg, setErrorMsg] = useState("");
+      const [difficulty, setDifficulty] = useState("mixed");
+      const [ttsEnabled, setTtsEnabled] = useState(() => localStorage.getItem(TTS_STORAGE) !== "off");
+      const [gameHistory, setGameHistory] = useState(loadHistory);
+      const [newRecord, setNewRecord] = useState(false);
       const { supported: micSupported, listening, transcript, start, stop, setTranscript } = useSpeechRecognition();
+
+      // Единый ответ: голосовой транскрипт попадает в то же поле, что и текст,
+      // отправляется всегда textInput — что видишь, то и отправишь
+      useEffect(() => {
+        if (transcript) setTextInput(transcript);
+      }, [transcript]);
+
       const fallbackIdx = useRef(0);
+      const askedRef = useRef([]);        // история вопросов — в ref, чтобы не ловить stale closure
+      const prefetchRef = useRef(null);   // промис предзагруженного следующего вопроса
+      const topicQueueRef = useRef(null); // очередь тем без повторов
+      const gameIdRef = useRef(0);        // защита от «гонки» между старой и новой игрой
+
+      const getTopicQueue = () => {
+        if (!topicQueueRef.current) topicQueueRef.current = createTopicQueue(TOPICS);
+        return topicQueueRef.current;
+      };
 
       const loadingMessages = [
         "Копаем вопрос из шахты...",
@@ -245,60 +495,80 @@
 
       const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-      const generateQuestion = useCallback(async (key) => {
+      const fetchNextQuestion = async (key, diff) => {
+        const gameId = gameIdRef.current;
+        let q = null;
+        if (key) {
+          try {
+            const topic = getTopicQueue().next();
+            const usr = buildQuestionUserPrompt(topic, askedRef.current, diff);
+            const raw = await callAI(key, QUESTION_SYSTEM_PROMPT, usr, { temperature: GEN_TEMPERATURE });
+            q = normalizeQuestion(parseJSON(raw));
+          } catch (e) {
+            q = null;
+          }
+        }
+        if (!q) {
+          q = pickFallbackQuestion(fallbackIdx.current, diff);
+          fallbackIdx.current++;
+        }
+        if (gameId === gameIdRef.current) askedRef.current = [...askedRef.current, q.question];
+        return q;
+      };
+
+      const presentQuestion = async (num) => {
+        const gameId = gameIdRef.current;
+        setScreen("playing");
         setLoading(true);
         setLoadingMsg(pickRandom(loadingMessages));
         setErrorMsg("");
-        try {
-          const history = askedQuestions.map((q) => `- ${q}`).join("\n");
-          const sys = `Ты — генератор вопросов для викторины по Minecraft. Отвечай ТОЛЬКО валидным JSON, без markdown, без пояснений. Формат: {"question":"...","correct_answer":"...","difficulty":"easy|medium|hard"}`;
-          const usr = `Придумай один интересный вопрос по Minecraft на русском языке. Тема может быть любая: крафт, мобы, биомы, редстоун, зачарования, Нижний мир, Край, механики игры, обновления.\n\nУже заданные вопросы (НЕ повторяй):\n${history || "пока нет"}\n\nСгенерируй вопрос.`;
-          const raw = await callClaude(key, sys, usr);
-          const q = parseJSON(raw);
-          if (!q.question || !q.correct_answer) throw new Error("bad format");
-          setCurrentQ(q);
-          setAskedQuestions((prev) => [...prev, q.question]);
-        } catch (e) {
-          const fb = FALLBACK_QUESTIONS[fallbackIdx.current % FALLBACK_QUESTIONS.length];
-          fallbackIdx.current++;
-          setCurrentQ(fb);
-          setAskedQuestions((prev) => [...prev, fb.question]);
-        }
+        setEvaluation(null);
+        setTextInput("");
+        setTranscript("");
+        const promise = prefetchRef.current || fetchNextQuestion(apiKey, difficulty);
+        prefetchRef.current = null;
+        const q = await promise;
+        if (gameId !== gameIdRef.current) return; // началась новая игра — этот вопрос уже не нужен
+        setCurrentQ(q);
         setLoading(false);
-      }, [askedQuestions]);
+        if (ttsEnabled) speak(q.question);
+        // предзагружаем следующий вопрос, пока игрок думает над текущим
+        if (num < TOTAL_QUESTIONS) prefetchRef.current = fetchNextQuestion(apiKey, difficulty);
+      };
 
-      const evaluateAnswer = useCallback(async (playerAnswer, key) => {
-        if (!playerAnswer.trim()) {
+      const evaluateAnswer = async () => {
+        const answer = textInput.trim();
+        if (!answer) {
           setErrorMsg("Скажи или напиши ответ!");
           return;
         }
+        stopSpeaking();
+        const gameId = gameIdRef.current;
         setScreen("evaluating");
         setLoading(true);
         setLoadingMsg(pickRandom(evalMessages));
-        try {
-          const sys = `Ты — судья викторины по Minecraft. Оцени ответ игрока по 5-балльной шкале. Отвечай ТОЛЬКО валидным JSON, без markdown. Формат: {"score":число_от_1_до_5,"comment":"краткий комментарий на русском","correct_answer":"полный правильный ответ"}`;
-          const usr = `Вопрос: ${currentQ.question}\nПравильный ответ: ${currentQ.correct_answer}\nОтвет игрока: ${playerAnswer}\n\nОцени. 5 = верно или почти верно, 4 = по сути верно но неточно, 3 = частично верно, 2 = слабо но что-то угадал, 1 = неверно. Дай короткий дружелюбный комментарий в стиле Minecraft.`;
-          const raw = await callClaude(key, sys, usr);
-          const ev = parseJSON(raw);
-          if (!ev.score || !ev.comment) throw new Error("bad format");
-          ev.score = Math.max(1, Math.min(5, Math.round(ev.score)));
-          setEvaluation(ev);
-          setScores((prev) => [...prev, ev.score]);
-        } catch (e) {
-          const norm = (s) => s.toLowerCase().replace(/[^а-яёa-z0-9\s]/g, "");
-          const pa = norm(playerAnswer);
-          const ca = norm(currentQ.correct_answer);
-          let score = 1;
-          if (pa === ca) score = 5;
-          else if (ca.split(" ").every((w) => w.length > 2 && pa.includes(w))) score = 4;
-          else if (ca.split(" ").some((w) => w.length > 2 && pa.includes(w))) score = 3;
-          const ev = { score, comment: score >= 4 ? "Отлично!" : score >= 3 ? "Почти!" : "Не совсем...", correct_answer: currentQ.correct_answer };
-          setEvaluation(ev);
-          setScores((prev) => [...prev, ev.score]);
+        let ev = null;
+        if (apiKey) {
+          try {
+            const raw = await callAI(apiKey, EVAL_SYSTEM_PROMPT, buildEvalUserPrompt(currentQ, answer), { temperature: EVAL_TEMPERATURE });
+            const parsed = parseJSON(raw);
+            if (!parsed.score || !parsed.comment) throw new Error("bad format");
+            parsed.score = Math.max(1, Math.min(5, Math.round(parsed.score)));
+            if (typeof parsed.correct_answer !== "string" || !parsed.correct_answer.trim()) {
+              parsed.correct_answer = currentQ.correct_answer;
+            }
+            ev = parsed;
+          } catch (e) {
+            ev = null;
+          }
         }
+        if (!ev) ev = localScore(answer, currentQ);
+        if (gameId !== gameIdRef.current) return;
+        setEvaluation(ev);
+        setScores((prev) => [...prev, ev.score]);
         setLoading(false);
         setScreen("result");
-      }, [currentQ]);
+      };
 
       const handleSaveKey = async () => {
         const key = apiKeyInput.trim();
@@ -309,8 +579,8 @@
         setApiKeyTesting(true);
         setApiKeyError("");
         try {
-          await callClaude(key, "Ответь одним словом.", "Скажи: ок");
-          localStorage.setItem("mc_quiz_api_key", key);
+          await callAI(key, "Ответь одним словом.", "Скажи: ок", { temperature: EVAL_TEMPERATURE, json: false });
+          localStorage.setItem(API_KEY_STORAGE, key);
           setApiKey(key);
           setApiKeyInput("");
         } catch (e) {
@@ -320,42 +590,62 @@
       };
 
       const handleStart = () => {
-        const key = apiKey;
-        setScreen("playing");
-        setQuestionNum(1);
-        setScores([]);
-        setAskedQuestions([]);
-        setEvaluation(null);
-        setTextInput("");
-        setTranscript("");
+        gameIdRef.current++;
+        stopSpeaking();
+        prefetchRef.current = null;
+        askedRef.current = [];
         fallbackIdx.current = 0;
-        generateQuestion(key);
+        getTopicQueue().reset();
+        setScores([]);
+        setNewRecord(false);
+        setQuestionNum(1);
+        presentQuestion(1);
+      };
+
+      const finishGame = () => {
+        const prevBest = bestTotal(gameHistory);
+        const entry = {
+          date: new Date().toISOString(),
+          total: totalScore,
+          scores: scores.slice(),
+          difficulty,
+        };
+        setGameHistory(saveGameResult(entry));
+        setNewRecord(gameHistory.length > 0 && totalScore > prevBest);
+        setScreen("final");
       };
 
       const handleNext = () => {
+        stopSpeaking();
         if (questionNum >= TOTAL_QUESTIONS) {
-          setScreen("final");
+          finishGame();
         } else {
-          setQuestionNum((n) => n + 1);
-          setEvaluation(null);
-          setTextInput("");
-          setTranscript("");
-          setScreen("playing");
-          generateQuestion(apiKey);
+          const n = questionNum + 1;
+          setQuestionNum(n);
+          presentQuestion(n);
         }
       };
 
-      const handleSubmitAnswer = () => {
-        const answer = transcript || textInput;
-        evaluateAnswer(answer, apiKey);
+      const toggleTts = () => {
+        const v = !ttsEnabled;
+        setTtsEnabled(v);
+        try { localStorage.setItem(TTS_STORAGE, v ? "on" : "off"); } catch (e) {}
+        if (!v) stopSpeaking();
       };
 
       const totalScore = scores.reduce((a, b) => a + b, 0);
       const avgScore = scores.length ? (totalScore / scores.length).toFixed(1) : 0;
-      const maxPossible = scores.length * 5;
+      const maxPossible = TOTAL_QUESTIONS * 5;
+      const recordTotal = bestTotal(gameHistory);
 
       const getDiffColor = (d) => d === "easy" ? "#8BC34A" : d === "medium" ? "#FFC107" : "#f44336";
       const getDiffLabel = (d) => d === "easy" ? "Легко" : d === "medium" ? "Средне" : "Сложно";
+      const DIFFICULTY_OPTIONS = [
+        { value: "mixed", label: "Смешанная" },
+        { value: "easy", label: "Легко" },
+        { value: "medium", label: "Средне" },
+        { value: "hard", label: "Сложно" },
+      ];
 
       const getGrade = () => {
         const avg = totalScore / TOTAL_QUESTIONS;
@@ -388,6 +678,30 @@
                 <div style={styles.infoRow}><span style={{fontSize:16}}>⭐</span> <span>Оценка от 1 до 5</span></div>
               </div>
 
+              {gameHistory.length > 0 && (
+                <div style={styles.recordLine}>
+                  🏅 Рекорд: {recordTotal}/{maxPossible} · Последняя игра: {gameHistory[0].total}/{maxPossible}
+                </div>
+              )}
+
+              <div style={styles.settingsBox}>
+                <div style={styles.settingsLabel}>Сложность</div>
+                <div style={styles.chipRow}>
+                  {DIFFICULTY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      style={{ ...styles.chip, ...(difficulty === opt.value ? styles.chipActive : {}) }}
+                      onClick={() => setDifficulty(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <button style={styles.ttsToggle} onClick={toggleTts}>
+                  {ttsEnabled ? "🔊 Озвучка вопросов: вкл" : "🔇 Озвучка вопросов: выкл"}
+                </button>
+              </div>
+
               {/* API Key section */}
               <div style={styles.apiKeyBox}>
                 <div style={styles.apiKeyLabel}>
@@ -396,7 +710,7 @@
                 {apiKey ? (
                   <div style={styles.apiKeyRow}>
                     <span style={styles.apiKeyMasked}>···{apiKey.slice(-6)}</span>
-                    <button style={styles.btnSmall} onClick={() => { localStorage.removeItem("mc_quiz_api_key"); setApiKey(""); }}>
+                    <button style={styles.btnSmall} onClick={() => { localStorage.removeItem(API_KEY_STORAGE); setApiKey(""); }}>
                       Сменить
                     </button>
                   </div>
@@ -453,12 +767,17 @@
                   </div>
                   <div style={styles.questionCard}>
                     <div style={styles.questionText}>{currentQ.question}</div>
+                    {window.speechSynthesis && (
+                      <button style={styles.speakBtn} onClick={() => speak(currentQ.question)}>
+                        🔊 Прочитать вопрос
+                      </button>
+                    )}
                   </div>
 
-                  {(transcript || textInput) && (
+                  {textInput && (
                     <div style={styles.transcriptBox}>
                       <div style={styles.transcriptLabel}>Твой ответ:</div>
-                      <div style={styles.transcriptText}>{transcript || textInput}</div>
+                      <div style={styles.transcriptText}>{textInput}</div>
                     </div>
                   )}
 
@@ -484,14 +803,14 @@
                         placeholder="...или напиши ответ"
                         value={textInput}
                         onChange={(e) => setTextInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSubmitAnswer()}
+                        onKeyDown={(e) => e.key === "Enter" && evaluateAnswer()}
                       />
                     </div>
 
                     <button
-                      style={{ ...styles.btnPrimary, marginTop: 8, opacity: (transcript || textInput) ? 1 : 0.5 }}
-                      onClick={handleSubmitAnswer}
-                      disabled={!(transcript || textInput)}
+                      style={{ ...styles.btnPrimary, marginTop: 8, opacity: textInput.trim() ? 1 : 0.5 }}
+                      onClick={evaluateAnswer}
+                      disabled={!textInput.trim()}
                     >
                       ✓ ОТВЕТИТЬ
                     </button>
@@ -541,6 +860,7 @@
                     <div style={styles.finalEmoji}>{g.emoji}</div>
                     <div style={styles.finalTitle}>{g.text}</div>
                     <div style={styles.finalSub}>{g.sub}</div>
+                    {newRecord && <div style={styles.newRecordBadge}>🏆 Новый рекорд!</div>}
                     <div style={styles.finalStats}>
                       <div style={styles.statItem}>
                         <div style={styles.statValue}>{totalScore}</div>
@@ -559,6 +879,9 @@
                         </div>
                       ))}
                     </div>
+                    {!newRecord && recordTotal > 0 && (
+                      <div style={styles.recordLine}>🏅 Рекорд: {recordTotal}/{maxPossible}</div>
+                    )}
                     <button style={styles.btnPrimary} onClick={handleStart}>
                       🔄 ИГРАТЬ СНОВА
                     </button>
@@ -571,7 +894,7 @@
       );
     }
 
-    // ── Styles ──
+    // ── Стили ──
 
     const pixelFont = `'Courier New', 'Courier', monospace`;
 
@@ -633,7 +956,7 @@
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        marginBottom: 20,
+        marginBottom: 14,
         background: "rgba(255,255,255,0.05)",
         borderRadius: 8,
         padding: "14px 24px",
@@ -647,6 +970,59 @@
         gap: 10,
         fontSize: 13,
         color: "#ccc",
+      },
+      recordLine: {
+        fontSize: 12,
+        color: "#FFD700",
+        marginBottom: 14,
+        letterSpacing: 0.5,
+      },
+      settingsBox: {
+        width: "100%",
+        maxWidth: 320,
+        marginBottom: 14,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(139,195,74,0.2)",
+        borderRadius: 8,
+        padding: "12px 16px",
+      },
+      settingsLabel: {
+        fontSize: 11,
+        color: "#8BC34A",
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        marginBottom: 8,
+        textAlign: "left",
+      },
+      chipRow: {
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        marginBottom: 10,
+      },
+      chip: {
+        background: "rgba(255,255,255,0.06)",
+        color: "#aaa",
+        border: "1px solid rgba(255,255,255,0.15)",
+        borderRadius: 4,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontFamily: pixelFont,
+        cursor: "pointer",
+      },
+      chipActive: {
+        background: "rgba(139,195,74,0.2)",
+        color: "#8BC34A",
+        border: "1px solid rgba(139,195,74,0.6)",
+      },
+      ttsToggle: {
+        background: "none",
+        color: "#aaa",
+        border: "none",
+        fontSize: 12,
+        fontFamily: pixelFont,
+        cursor: "pointer",
+        padding: 0,
       },
       apiKeyBox: {
         width: "100%",
@@ -755,6 +1131,17 @@
         fontWeight: 600,
         color: "#f0f0f0",
       },
+      speakBtn: {
+        marginTop: 12,
+        background: "rgba(139,195,74,0.12)",
+        color: "#8BC34A",
+        border: "1px solid rgba(139,195,74,0.3)",
+        borderRadius: 4,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontFamily: pixelFont,
+        cursor: "pointer",
+      },
       transcriptBox: {
         background: "rgba(139,195,74,0.1)",
         border: "1px solid rgba(139,195,74,0.3)",
@@ -802,6 +1189,7 @@
         transition: "all 0.2s",
         userSelect: "none",
         WebkitUserSelect: "none",
+        touchAction: "none",
       },
       micBtnActive: {
         background: "rgba(255,0,0,0.12)",
@@ -899,7 +1287,17 @@
       finalSub: {
         fontSize: 13,
         color: "#aaa",
-        marginBottom: 24,
+        marginBottom: 16,
+      },
+      newRecordBadge: {
+        fontSize: 15,
+        fontWeight: 700,
+        color: "#FFD700",
+        background: "rgba(255,215,0,0.1)",
+        border: "1px solid rgba(255,215,0,0.4)",
+        borderRadius: 8,
+        padding: "8px 16px",
+        marginBottom: 16,
       },
       finalStats: {
         display: "flex",
@@ -945,6 +1343,16 @@
         fontWeight: 700,
         color: "#fff",
       },
+    };
+
+    // Хук для тестов: доступ к чистой логике без рендера (в проде безвреден)
+    window.__MCQUIZ_TEST__ = {
+      TOTAL_QUESTIONS, API_URL, MODEL, GEN_TEMPERATURE, EVAL_TEMPERATURE, API_TIMEOUT_MS,
+      TOPICS, FALLBACK_QUESTIONS, QUESTION_EXAMPLES, QUESTION_SYSTEM_PROMPT, EVAL_SYSTEM_PROMPT,
+      callAI, parseJSON, buildQuestionUserPrompt, buildEvalUserPrompt,
+      normalizeQuestion, pickFallbackQuestion, createTopicQueue, localScore,
+      correctMinecraftTerms, MC_CORRECTIONS, RAW_CORRECTIONS,
+      loadHistory, saveGameResult, bestTotal,
     };
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
