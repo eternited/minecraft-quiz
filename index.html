@@ -28,18 +28,36 @@
 <body>
   <div id="root"></div>
 
+  <script>
+    // Регистрация Service Worker — отдельным скриптом, не зависящим от Babel/React
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("./sw.js").catch(function () {});
+      });
+    }
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
     // ── Константы ──
 
-    const APP_VERSION = "1.7.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
+    // Формат версии: "ГГГГ-ММ-ДД.N" (дата выкладки + номер выкладки за день).
+    // Перед каждым коммитом в master брать дату командой `date +%F` (не по памяти!).
+    const APP_VERSION = "2026-07-18.1";
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
     const GEN_TEMPERATURE = 0.7;
     const EVAL_TEMPERATURE = 0.2;
     const VERIFY_TEMPERATURE = 0; // факт-чек — максимально детерминированный
+
+    // Тайминги механизма самообновления (см. update-mechanism-guide.md);
+    // window.__MCQUIZ_TUNE__ позволяет e2e-тестам ускорить их, прод не трогает
+    const UPD_TUNE = window.__MCQUIZ_TUNE__ || {};
+    const UPD_FIRST_CHECK_MS = UPD_TUNE.firstCheck || 8000;
+    const UPD_INTERVAL_MS = UPD_TUNE.interval || 15 * 60 * 1000;
+    const UPD_CALM_MS = UPD_TUNE.calm || 2500;
     const API_TIMEOUT_MS = 15000;
     const API_KEY_STORAGE = "mc_quiz_api_key";
     const TTS_STORAGE = "mc_quiz_tts";
@@ -359,6 +377,20 @@
       return judgeEv;
     }
 
+    // ── Самообновление: чистая логика (см. update-mechanism-guide.md) ──
+
+    function normalizeEtag(v) { return v ? String(v).replace(/^W\//, "") : null; }
+
+    // Решение «что делать с доступным обновлением» + защита от циклов перезагрузок
+    function updateAction(o) {
+      if (!o || !o.available || o.updating) return "none";
+      if (o.ctx === "hide") return "none";
+      if (o.ctx !== "auto") return "banner";
+      if (o.sinceFailMs != null && o.sinceFailMs < 60000) return "banner";   // недавний провал сети
+      if (o.sinceAutoMs != null && o.sinceAutoMs < 120000) return "banner";  // недавнее автообновление
+      return "auto";
+    }
+
     // ── История результатов ──
 
     function loadHistory() {
@@ -584,6 +616,99 @@
         clearTimeout(exitTimerRef.current);
       }, [screen]);
 
+      // ── Самообновление (механизм из update-mechanism-guide.md) ──
+      const [updAvail, setUpdAvail] = useState(false);
+      const [updating, setUpdating] = useState(false);
+      const updatingRef = useRef(false);
+      const lastFailRef = useRef(null);
+
+      // Контексты экранов викторины: вопрос/оценка — не мешать вообще;
+      // главный экран — тихое обновление, но только плашка, если видна форма
+      // ключа или в ней что-то набрано (перезагрузка стёрла бы ввод);
+      // итоги вопроса и финал — плашка.
+      const updCtx =
+        screen === "playing" || screen === "evaluating" ? "hide"
+        : screen === "start" ? (apiKey && !apiKeyInput ? "auto" : "banner")
+        : "banner";
+
+      const updState = () => {
+        let sinceAutoMs = null;
+        try {
+          const t = parseInt(localStorage.getItem("lastAutoUpd"), 10);
+          if (t) sinceAutoMs = Date.now() - t;
+        } catch (e) {}
+        return {
+          available: updAvail,
+          updating: updatingRef.current,
+          ctx: updCtx,
+          sinceFailMs: lastFailRef.current ? Date.now() - lastFailRef.current : null,
+          sinceAutoMs,
+        };
+      };
+
+      const checkUpdate = async () => {
+        if (updatingRef.current || !navigator.onLine || document.hidden) return;
+        if (!("caches" in window)) return;
+        try {
+          const head = await fetch("./index.html", { method: "HEAD", cache: "no-store" });
+          if (!head.ok) return;
+          const net = normalizeEtag(head.headers.get("etag")) || head.headers.get("last-modified");
+          if (!net) return;
+          const cached = await caches.match("./index.html");
+          if (!cached) return; // офлайн-кэш ещё не построен — обновлять нечего
+          const cur = normalizeEtag(cached.headers.get("etag")) || cached.headers.get("last-modified");
+          if (cur && net !== cur) setUpdAvail(true);
+        } catch (e) {} // сеть моргнула — проверим в следующий раз
+      };
+
+      const startUpdate = async () => {
+        if (updatingRef.current) return;
+        updatingRef.current = true;
+        setUpdating(true); // полноэкранный оверлей поверх всего
+        try {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) reg.update().catch(() => {}); // заодно браузер проверит sw.js
+        } catch (e) {}
+        const ok = await new Promise((resolve) => {
+          const ctrl = navigator.serviceWorker && navigator.serviceWorker.controller;
+          if (!ctrl) { resolve("no-sw"); return; } // SW нет — просто reload, хуже не будет
+          const ch = new MessageChannel();
+          const to = setTimeout(() => resolve(false), 30000);
+          ch.port1.onmessage = (e) => { clearTimeout(to); resolve(!!(e.data && e.data.ok)); };
+          ctrl.postMessage({ type: "refresh-shell" }, [ch.port2]);
+        });
+        if (ok === true || ok === "no-sw") {
+          try { localStorage.setItem("lastAutoUpd", String(Date.now())); } catch (e) {}
+          window.location.reload();
+          return;
+        }
+        lastFailRef.current = Date.now(); // сеть подвела: оверлей убрать, плашка останется
+        updatingRef.current = false;
+        setUpdating(false);
+      };
+
+      // Триггеры проверки: после старта, раз в UPD_INTERVAL_MS и при возврате из фона
+      useEffect(() => {
+        const t0 = setTimeout(checkUpdate, UPD_FIRST_CHECK_MS);
+        const iv = setInterval(checkUpdate, UPD_INTERVAL_MS);
+        const onVis = () => { if (!document.hidden) checkUpdate(); };
+        document.addEventListener("visibilitychange", onVis);
+        return () => {
+          clearTimeout(t0);
+          clearInterval(iv);
+          document.removeEventListener("visibilitychange", onVis);
+        };
+      }, []);
+
+      // Автообновление — только если контекст «auto» продержался UPD_CALM_MS
+      useEffect(() => {
+        if (updateAction(updState()) !== "auto") return;
+        const t = setTimeout(() => {
+          if (updateAction(updState()) === "auto") startUpdate();
+        }, UPD_CALM_MS);
+        return () => clearTimeout(t);
+      }, [updAvail, updCtx, updating]);
+
       const getTopicQueue = () => {
         if (!topicQueueRef.current) topicQueueRef.current = createTopicQueue(TOPICS);
         return topicQueueRef.current;
@@ -711,7 +836,7 @@
         setApiKeyError("");
         try {
           await callAI(key, "Ответь одним словом.", "Скажи: ок", { temperature: EVAL_TEMPERATURE, json: false });
-          localStorage.setItem(API_KEY_STORAGE, key);
+          try { localStorage.setItem(API_KEY_STORAGE, key); } catch (e) {} // приватный режим Safari
           setApiKey(key);
           setApiKeyInput("");
         } catch (e) {
@@ -869,7 +994,7 @@
                 {apiKey ? (
                   <div style={styles.apiKeyRow}>
                     <span style={styles.apiKeyMasked}>···{apiKey.slice(-6)}</span>
-                    <button style={styles.btnSmall} onClick={() => { localStorage.removeItem(API_KEY_STORAGE); setApiKey(""); }}>
+                    <button style={styles.btnSmall} onClick={() => { try { localStorage.removeItem(API_KEY_STORAGE); } catch (e) {} setApiKey(""); }}>
                       Сменить
                     </button>
                   </div>
@@ -1065,7 +1190,24 @@
             </div>
           )}
 
-          <div className="version-tag">v{APP_VERSION}</div>
+          <div className="version-tag">{APP_VERSION}</div>
+
+          {/* Плашка обновления (контекст banner); при hide не рендерится вовсе */}
+          {updateAction(updState()) === "banner" && (
+            <div style={styles.updBanner}>
+              <span>Появилась новая версия</span>
+              <button style={styles.btnSmall} onClick={startUpdate}>Обновить</button>
+            </div>
+          )}
+
+          {/* Оверлей обновления: перекрывает всё, пока свежая версия качается в кэш */}
+          {updating && (
+            <div style={styles.updOverlay}>
+              <div style={styles.loader} />
+              <div style={styles.loadingText}>Обновляю приложение…</div>
+              <div style={styles.updOverlaySub}>Пара секунд — и продолжим!</div>
+            </div>
+          )}
         </div>
       );
     }
@@ -1554,6 +1696,40 @@
         fontWeight: 700,
         color: "#fff",
       },
+      updBanner: {
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 800,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 12,
+        padding: "10px 16px",
+        paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
+        background: "rgba(38,50,56,0.97)",
+        borderTop: "1px solid rgba(139,195,74,0.4)",
+        fontSize: 13,
+        color: "#e8e8e8",
+      },
+      updOverlay: {
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(26,26,46,0.97)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        textAlign: "center",
+        padding: 20,
+      },
+      updOverlaySub: {
+        fontSize: 12,
+        color: "#aaa",
+      },
     };
 
     // Хук для тестов: доступ к чистой логике без рендера (в проде безвреден)
@@ -1564,7 +1740,7 @@
       VERIFY_SYSTEM_PROMPT, VERIFY_TEMPERATURE, buildVerifyUserPrompt, applyVerification,
       callAI, parseJSON, buildQuestionUserPrompt, buildEvalUserPrompt,
       normalizeQuestion, pickFallbackQuestion, createTopicQueue, localScore,
-      MC_SYNONYMS, mergeEvaluations,
+      MC_SYNONYMS, mergeEvaluations, normalizeEtag, updateAction,
       correctMinecraftTerms, MC_CORRECTIONS, RAW_CORRECTIONS,
       loadHistory, saveGameResult, bestTotal,
     };

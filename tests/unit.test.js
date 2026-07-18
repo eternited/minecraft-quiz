@@ -461,8 +461,35 @@ async function main() {
   });
 
   console.log("\nВерсия приложения:");
-  test("APP_VERSION задана в формате semver", () => {
-    assert.match(T.APP_VERSION, /^\d+\.\d+\.\d+$/);
+  test("APP_VERSION в формате даты выкладки ГГГГ-ММ-ДД.N", () => {
+    assert.match(T.APP_VERSION, /^\d{4}-\d{2}-\d{2}\.\d+$/);
+  });
+
+  console.log("\nСамообновление — чистая логика:");
+  test("normalizeEtag: срезает слабый префикс W/, пустое → null", () => {
+    assert.strictEqual(T.normalizeEtag('W/"abc"'), '"abc"');
+    assert.strictEqual(T.normalizeEtag('"abc"'), '"abc"');
+    assert.strictEqual(T.normalizeEtag(null), null);
+    assert.strictEqual(T.normalizeEtag(undefined), null);
+  });
+  test("updateAction: нет обновления / уже обновляемся / пусто → none", () => {
+    assert.strictEqual(T.updateAction(null), "none");
+    assert.strictEqual(T.updateAction({ available: false, ctx: "auto" }), "none");
+    assert.strictEqual(T.updateAction({ available: true, updating: true, ctx: "auto" }), "none");
+  });
+  test("updateAction: hide → none (не мешать игре)", () => {
+    assert.strictEqual(T.updateAction({ available: true, ctx: "hide" }), "none");
+  });
+  test("updateAction: banner-контекст → banner", () => {
+    assert.strictEqual(T.updateAction({ available: true, ctx: "banner" }), "banner");
+  });
+  test("updateAction: чистый auto → auto (в т.ч. когда защиты истекли)", () => {
+    assert.strictEqual(T.updateAction({ available: true, ctx: "auto", sinceFailMs: null, sinceAutoMs: null }), "auto");
+    assert.strictEqual(T.updateAction({ available: true, ctx: "auto", sinceFailMs: 61000, sinceAutoMs: 121000 }), "auto");
+  });
+  test("updateAction: защита от циклов — недавний провал или автообновление → banner", () => {
+    assert.strictEqual(T.updateAction({ available: true, ctx: "auto", sinceFailMs: 59000, sinceAutoMs: null }), "banner");
+    assert.strictEqual(T.updateAction({ available: true, ctx: "auto", sinceFailMs: null, sinceAutoMs: 119000 }), "banner");
   });
 
   console.log("\nИстория результатов:");
@@ -478,6 +505,75 @@ async function main() {
   test("битый JSON в localStorage → пустая история", () => {
     ctx.localStorage.setItem("mc_quiz_history", "{битый json");
     jeq(T.loadHistory(), []);
+  });
+
+  // ── Service Worker (sw.js) в VM ──
+
+  const swCode = fs.readFileSync(path.join(__dirname, "..", "sw.js"), "utf8");
+  function makeSwContext() {
+    const puts = [];
+    const store = new Map();
+    const cacheObj = {
+      put: (k, r) => { puts.push(k); store.set(k, r); return Promise.resolve(); },
+      match: (k) => Promise.resolve(store.get(k)),
+      addAll: () => Promise.resolve(),
+    };
+    const handlers = {};
+    const sandbox = {
+      setTimeout, clearTimeout, URL, console,
+      caches: {
+        open: () => Promise.resolve(cacheObj),
+        keys: () => Promise.resolve([]),
+        delete: () => Promise.resolve(true),
+        match: (k) => cacheObj.match(k),
+      },
+      fetch: () => Promise.reject(new Error("fetch не застаблен")),
+      Response: class { constructor(body, init) { this.body = body; this.status = (init && init.status) || 200; } },
+    };
+    sandbox.self = sandbox;
+    sandbox.globalThis = sandbox;
+    sandbox.addEventListener = (t, f) => { handlers[t] = f; };
+    sandbox.skipWaiting = () => Promise.resolve();
+    sandbox.clients = { claim: () => Promise.resolve() };
+    sandbox.location = { origin: "https://t.local" };
+    sandbox.registration = { scope: "https://t.local/" };
+    vm.createContext(sandbox);
+    vm.runInContext(swCode, sandbox);
+    return { handlers, puts, store, sandbox };
+  }
+
+  console.log("\nService Worker (sw.js в VM):");
+  await atest("refresh-shell обновляет ОБА ключа и подтверждает только после записи", async () => {
+    const { handlers, puts, sandbox } = makeSwContext();
+    sandbox.fetch = () => Promise.resolve({ status: 200, clone() { return this; } });
+    const msg = await new Promise((res) => {
+      handlers.message({ data: { type: "refresh-shell" }, ports: [{ postMessage: res }] });
+    });
+    assert.strictEqual(msg.ok, true);
+    assert.deepStrictEqual(puts, ["./index.html", "."], "должны обновиться оба ключа оболочки (грабля №1)");
+  });
+  await atest("refresh-shell: сбой сети → ok:false, кэш не тронут", async () => {
+    const { handlers, puts, sandbox } = makeSwContext();
+    sandbox.fetch = () => Promise.reject(new Error("net down"));
+    const msg = await new Promise((res) => {
+      handlers.message({ data: { type: "refresh-shell" }, ports: [{ postMessage: res }] });
+    });
+    assert.strictEqual(msg.ok, false);
+    assert.deepStrictEqual(puts, []);
+  });
+  await atest("refresh-shell: не-200 → ok:false", async () => {
+    const { handlers, sandbox } = makeSwContext();
+    sandbox.fetch = () => Promise.resolve({ status: 500, clone() { return this; } });
+    const msg = await new Promise((res) => {
+      handlers.message({ data: { type: "refresh-shell" }, ports: [{ postMessage: res }] });
+    });
+    assert.strictEqual(msg.ok, false);
+  });
+  test("HEAD не перехватывается fetch-обработчиком (проверка версии идёт мимо SW)", () => {
+    const { handlers } = makeSwContext();
+    let responded = false;
+    handlers.fetch({ request: { method: "HEAD", url: "https://t.local/index.html" }, respondWith: () => { responded = true; } });
+    assert.strictEqual(responded, false);
   });
 
   console.log("");
