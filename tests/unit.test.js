@@ -296,6 +296,49 @@ async function main() {
     assert.ok(/окончания и падежи неточностью НЕ считаются/.test(p), "в шкале нет оговорки про окончания");
   });
 
+  console.log("\nФакт-чек вопросов:");
+  test("системный промпт проверяющего: вердикты, измерения, Java Edition", () => {
+    const p = T.VERIFY_SYSTEM_PROMPT;
+    assert.ok(p.includes("Java Edition"));
+    assert.ok(p.includes("verdict") && p.includes("reject") && p.includes("corrected_answer"));
+    assert.ok(p.includes("Нижний мир") && p.includes("Кра"), "нет правила про измерения");
+    assert.ok(p.includes("эндерняк") && p.includes("незерак"), "нет примеров старых/разговорных названий");
+  });
+  test("температура факт-чека = 0", () => {
+    assert.strictEqual(T.VERIFY_TEMPERATURE, 0);
+  });
+  test("buildVerifyUserPrompt содержит вопрос, ответ и варианты", () => {
+    const p = T.buildVerifyUserPrompt({ question: "В?", correct_answer: "Камень Края", acceptable_answers: ["эндерняк"] });
+    assert.ok(p.includes("Вопрос: В?"));
+    assert.ok(p.includes("Заявленный правильный ответ: Камень Края"));
+    assert.ok(p.includes("эндерняк"));
+  });
+  test("applyVerification: ok дополняет варианты без дублей (ё/регистр)", () => {
+    const q = { question: "В?", correct_answer: "Камень Края", difficulty: "easy", acceptable_answers: ["камень края"] };
+    const out = T.applyVerification(q, { verdict: "ok", acceptable_answers: ["эндерняк", "Камень Края"] });
+    jeq(out.acceptable_answers, ["камень края", "эндерняк"]);
+    assert.strictEqual(out.correct_answer, "Камень Края");
+  });
+  test("applyVerification: fix заменяет ответ, неверный старый не тащит в допустимые", () => {
+    const q = { question: "Коренной блок острова в Крае?", correct_answer: "Адский камень", difficulty: "easy", acceptable_answers: ["адский камень"] };
+    const out = T.applyVerification(q, { verdict: "fix", corrected_answer: "Камень Края", acceptable_answers: ["эндерняк", "end stone"] });
+    assert.strictEqual(out.correct_answer, "Камень Края");
+    jeq(out.acceptable_answers, ["эндерняк", "end stone"]);
+  });
+  test("applyVerification: reject → null, мусорный вердикт → вопрос как есть", () => {
+    const q = { question: "В?", correct_answer: "О", difficulty: "easy", acceptable_answers: [] };
+    assert.strictEqual(T.applyVerification(q, { verdict: "reject", reason: "выдумка" }), null);
+    jeq(T.applyVerification(q, null), { question: "В?", correct_answer: "О", difficulty: "easy", acceptable_answers: [] });
+    jeq(T.applyVerification(q, "мусор"), { question: "В?", correct_answer: "О", difficulty: "easy", acceptable_answers: [] });
+  });
+  test("генерация: промпт запрещает смешивать измерения и просит старые названия", () => {
+    assert.ok(T.QUESTION_SYSTEM_PROMPT.includes("Нижний мир ≠ Край"));
+    assert.ok(T.QUESTION_SYSTEM_PROMPT.includes("эндерняк"));
+  });
+  test("судья вправе исправить неверный эталонный ответ", () => {
+    assert.ok(/противоречит вопросу или фактам игры/.test(T.EVAL_SYSTEM_PROMPT));
+  });
+
   console.log("\ncallAI:");
   await atest("шлёт temperature, model, json-режим и Bearer-ключ", async () => {
     let captured = null;

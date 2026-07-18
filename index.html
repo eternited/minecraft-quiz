@@ -11,21 +11,17 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #1a1a2e; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    /* Бейдж версии — CSS-классом, а не inline: нужен каскадный фолбэк для env()
-       (safe-area на iPhone с «чёлкой»; в правом углу бейдж попадал под скругление экрана) */
+    /* Бейдж версии — обычный элемент в конце флекс-колонки (НЕ fixed):
+       занимает собственное место в потоке, поэтому кнопки не могут его перекрыть.
+       CSS-классом, а не inline: нужен каскадный фолбэк для env() (safe-area iPhone). */
     .version-tag {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 8px;
-      bottom: calc(8px + env(safe-area-inset-bottom, 0px));
       text-align: center;
       font-size: 10px;
       letter-spacing: 1px;
       color: rgba(255,255,255,0.35);
       font-family: 'Courier New', 'Courier', monospace;
-      pointer-events: none;
-      z-index: 101;
+      padding: 10px 0 8px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     }
   </style>
 </head>
@@ -37,12 +33,13 @@
 
     // ── Константы ──
 
-    const APP_VERSION = "1.4.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
+    const APP_VERSION = "1.5.0"; // поднимать при каждом изменении приложения (фичи — minor, фиксы — patch)
     const TOTAL_QUESTIONS = 10;
     const API_URL = "https://api.deepseek.com/chat/completions";
     const MODEL = "deepseek-chat";
     const GEN_TEMPERATURE = 0.7;
     const EVAL_TEMPERATURE = 0.2;
+    const VERIFY_TEMPERATURE = 0; // факт-чек — максимально детерминированный
     const API_TIMEOUT_MS = 15000;
     const API_KEY_STORAGE = "mc_quiz_api_key";
     const TTS_STORAGE = "mc_quiz_tts";
@@ -146,10 +143,11 @@
       "- Вопрос — только о реальной механике, предмете, мобе, блоке или структуре игры, которые можно проверить по Minecraft Wiki. Ничего не выдумывай.",
       "- Ответ должен быть коротким и однозначным.",
       "- Используй официальную русскую локализацию терминов: Нижний мир, Край, крипер, эндермен, редстоун.",
+      "- Не смешивай измерения и их содержимое: Нижний мир ≠ Край (незерак и адский камень — в Нижнем мире; камень Края и эндерняк — в Крае). Вопрос и ответ должны быть про одно и то же.",
       "- Перед выводом проверь себя: убедись, что вопрос относится к реальной игре и на него существует один общепризнанный ответ.",
       "",
       'Отвечай ТОЛЬКО валидным JSON без markdown и пояснений. Формат: {"question":"...","correct_answer":"...","acceptable_answers":["...","..."],"difficulty":"easy|medium|hard"}',
-      "Поле acceptable_answers — массив из 2–4 допустимых вариантов ответа: синонимы и разговорные названия.",
+      "Поле acceptable_answers — массив из 2–4 допустимых вариантов ответа: синонимы, разговорные и старые названия локализации (например: незерак — адский камень; камень Края — эндерняк).",
       "",
       "Примеры хороших вопросов:",
       ...QUESTION_EXAMPLES.map((ex) => JSON.stringify(ex)),
@@ -176,7 +174,7 @@
       ].join("\n");
     }
 
-    const EVAL_SYSTEM_PROMPT = 'Ты — судья викторины по Minecraft (Java Edition). Оцени ответ игрока по 5-балльной шкале. Игрок отвечает голосом, а распознавание речи часто путает окончания, род, падеж и букву ё. Если ответ совпадает с правильным или с допустимым вариантом с точностью до окончаний, рода, падежа, числа, регистра, ё/е или пунктуации — это ПОЛНОЕ совпадение: ставь 5 и не упрекай игрока в неточности. Отвечай ТОЛЬКО валидным JSON без markdown. Формат: {"score":число_от_1_до_5,"comment":"краткий дружелюбный комментарий на русском","correct_answer":"полный правильный ответ"}';
+    const EVAL_SYSTEM_PROMPT = 'Ты — судья викторины по Minecraft (Java Edition). Оцени ответ игрока по 5-балльной шкале. Игрок отвечает голосом, а распознавание речи часто путает окончания, род, падеж и букву ё. Если ответ совпадает с правильным или с допустимым вариантом с точностью до окончаний, рода, падежа, числа, регистра, ё/е или пунктуации — это ПОЛНОЕ совпадение: ставь 5 и не упрекай игрока в неточности. Если указанный правильный ответ сам противоречит вопросу или фактам игры, а ответ игрока по фактам Minecraft верен — ставь 5 и напиши в correct_answer настоящий правильный ответ. Отвечай ТОЛЬКО валидным JSON без markdown. Формат: {"score":число_от_1_до_5,"comment":"краткий дружелюбный комментарий на русском","correct_answer":"полный правильный ответ"}';
 
     function buildEvalUserPrompt(q, playerAnswer) {
       const lines = [
@@ -192,6 +190,46 @@
         "Шкала: 5 = верно, совпадает по смыслу с любым допустимым вариантом или отличается от него только окончаниями/родом/падежом; 4 = по сути верно, но есть содержательная неточность (окончания и падежи неточностью НЕ считаются); 3 = частично верно; 2 = слабо, но что-то угадал; 1 = неверно. Синонимы, разговорные формулировки и огрехи распознавания речи не снижают балл. Дай короткий дружелюбный комментарий в стиле Minecraft."
       );
       return lines.join("\n");
+    }
+
+    // ── Факт-чек сгенерированных вопросов ──
+    // Второй AI-вызов с temperature 0 проверяет вопрос по фактам игры до показа игроку:
+    // ok — оставить, fix — заменить правильный ответ, reject — перегенерировать.
+
+    const VERIFY_SYSTEM_PROMPT = 'Ты — придирчивый факт-чекер вопросов викторины по Minecraft (Java Edition). Проверяй строго по фактам игры (как в Minecraft Wiki): 1) вопрос относится к реальной игре и сформулирован осмысленно; 2) указанный правильный ответ действительно верен и однозначен; 3) вопрос и ответ не путают измерения, блоки, мобов и механики (Нижний мир ≠ Край: незерак и адский камень — в Нижнем мире, камень Края и эндерняк — в Крае). Отвечай ТОЛЬКО валидным JSON без markdown. Формат: {"verdict":"ok|fix|reject","corrected_answer":"правильный ответ, если нужен fix","acceptable_answers":["синонимы, старые и разговорные названия правильного ответа"],"reason":"кратко"}. ok — вопрос и ответ верны; fix — вопрос хороший, но правильный ответ надо заменить на corrected_answer; reject — вопрос выдуман, неоднозначен или не о реальной игре. Всегда заполняй acceptable_answers: официальное название, старое название локализации и разговорные варианты.';
+
+    function buildVerifyUserPrompt(q) {
+      const lines = [
+        "Вопрос: " + q.question,
+        "Заявленный правильный ответ: " + q.correct_answer,
+      ];
+      if (q.acceptable_answers && q.acceptable_answers.length) {
+        lines.push("Заявленные допустимые варианты: " + q.acceptable_answers.join("; "));
+      }
+      lines.push("", "Проверь по фактам Minecraft (Java Edition) и верни JSON.");
+      return lines.join("\n");
+    }
+
+    function applyVerification(q, verdict) {
+      if (!verdict || typeof verdict !== "object") return q; // проверка не удалась — не блокируем игру
+      const dedupe = (arr) => {
+        const seen = new Set();
+        return arr.filter((a) => {
+          const k = a.toLowerCase().replace(/ё/g, "е");
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      };
+      const extra = Array.isArray(verdict.acceptable_answers)
+        ? verdict.acceptable_answers.filter((a) => typeof a === "string" && a.trim()).map((a) => a.trim())
+        : [];
+      if (verdict.verdict === "reject") return null;
+      if (verdict.verdict === "fix" && typeof verdict.corrected_answer === "string" && verdict.corrected_answer.trim()) {
+        // старый correct_answer был неверным — в допустимые варианты его не переносим
+        return { ...q, correct_answer: verdict.corrected_answer.trim(), acceptable_answers: dedupe(extra).slice(0, 6) };
+      }
+      return { ...q, acceptable_answers: dedupe([...q.acceptable_answers, ...extra]).slice(0, 6) };
     }
 
     // ── Утилиты вопросов ──
@@ -536,9 +574,29 @@
         if (key) {
           try {
             const topic = getTopicQueue().next();
-            const usr = buildQuestionUserPrompt(topic, askedRef.current, diff);
-            const raw = await callAI(key, QUESTION_SYSTEM_PROMPT, usr, { temperature: GEN_TEMPERATURE });
-            q = normalizeQuestion(parseJSON(raw));
+            let rejectionNote = "";
+            for (let attempt = 0; attempt < 2 && !q; attempt++) {
+              const usr = buildQuestionUserPrompt(topic, askedRef.current, diff) + rejectionNote;
+              const raw = await callAI(key, QUESTION_SYSTEM_PROMPT, usr, { temperature: GEN_TEMPERATURE });
+              const candidate = normalizeQuestion(parseJSON(raw));
+              if (!candidate) continue;
+              // факт-чек вторым вызовом; сбой самой проверки не блокирует игру
+              let verdict = null;
+              try {
+                const vraw = await callAI(key, VERIFY_SYSTEM_PROMPT, buildVerifyUserPrompt(candidate), { temperature: VERIFY_TEMPERATURE });
+                verdict = parseJSON(vraw);
+              } catch (e) {
+                verdict = null;
+              }
+              const checked = applyVerification(candidate, verdict);
+              if (checked) {
+                q = checked;
+              } else {
+                rejectionNote = "\n\nПредыдущий вопрос по этой теме отклонён проверкой" +
+                  (verdict && verdict.reason ? " (причина: " + verdict.reason + ")" : "") +
+                  ". Придумай другой вопрос, строго по фактам игры.";
+              }
+            }
           } catch (e) {
             q = null;
           }
@@ -721,7 +779,6 @@
       return (
         <div style={styles.container}>
           <div style={styles.scanlines} />
-          <div className="version-tag">v{APP_VERSION}</div>
 
           {/* ── START ── */}
           {screen === "start" && (
@@ -969,6 +1026,8 @@
               })()}
             </div>
           )}
+
+          <div className="version-tag">v{APP_VERSION}</div>
         </div>
       );
     }
@@ -1464,6 +1523,7 @@
       APP_VERSION,
       TOTAL_QUESTIONS, API_URL, MODEL, GEN_TEMPERATURE, EVAL_TEMPERATURE, API_TIMEOUT_MS,
       TOPICS, FALLBACK_QUESTIONS, QUESTION_EXAMPLES, QUESTION_SYSTEM_PROMPT, EVAL_SYSTEM_PROMPT,
+      VERIFY_SYSTEM_PROMPT, VERIFY_TEMPERATURE, buildVerifyUserPrompt, applyVerification,
       callAI, parseJSON, buildQuestionUserPrompt, buildEvalUserPrompt,
       normalizeQuestion, pickFallbackQuestion, createTopicQueue, localScore,
       correctMinecraftTerms, MC_CORRECTIONS, RAW_CORRECTIONS,

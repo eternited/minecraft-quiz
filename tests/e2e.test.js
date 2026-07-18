@@ -92,6 +92,7 @@ async function scenarioWithApi(browser, base) {
   const pageErrors = [];
   const genRequests = [];
   const evalRequests = [];
+  const verifyRequests = [];
 
   await context.addInitScript(() => localStorage.setItem("mc_quiz_api_key", "test-key-123"));
   await context.route("**/*", (route) => {
@@ -110,6 +111,10 @@ async function scenarioWithApi(browser, base) {
           difficulty: "easy",
         }));
       }
+      if (sys.includes("факт-чекер")) {
+        verifyRequests.push(body);
+        return route.fulfill(aiChoice({ verdict: "ok", acceptable_answers: ["проверенный вариант"] }));
+      }
       if (sys.includes("судья")) {
         evalRequests.push(body);
         return route.fulfill(aiChoice({ score: 5, comment: "Отлично, шахтёр!", correct_answer: "Ответ 1" }));
@@ -125,15 +130,19 @@ async function scenarioWithApi(browser, base) {
   await page.goto(base);
   await page.getByText("DeepSeek API-ключ сохранён").waitFor({ timeout: 20000 });
 
-  // Бейдж версии виден, совпадает с APP_VERSION и вписан в экран (без вылезания за края)
+  // Бейдж версии: есть, semver, не выходит за экран по горизонтали
+  // и НЕ пересекается с кнопками (регресс: кнопки наползали на fixed-бейдж)
+  const intersects = (a, b) => a && b &&
+    a.x < b.x + b.width && b.x < a.x + a.width &&
+    a.y < b.y + b.height && b.y < a.y + a.height;
   const appVersion = await page.evaluate(() => window.__MCQUIZ_TEST__.APP_VERSION);
   assert.match(appVersion, /^\d+\.\d+\.\d+$/, "APP_VERSION не semver");
-  assert.ok(await page.getByText("v" + appVersion, { exact: true }).isVisible(), "нет бейджа версии на старте");
   const vp = page.viewportSize();
-  const box = await page.locator(".version-tag").boundingBox();
-  assert.ok(box, "у бейджа версии нет boundingBox");
-  assert.ok(box.x >= 0 && box.x + box.width <= vp.width + 0.5, "бейдж выходит за экран по горизонтали");
-  assert.ok(box.y >= 0 && box.y + box.height <= vp.height + 0.5, "бейдж выходит за экран по вертикали");
+  const badgeBox = await page.locator(".version-tag").boundingBox();
+  assert.ok(badgeBox, "у бейджа версии нет boundingBox");
+  assert.ok(badgeBox.x >= 0 && badgeBox.x + badgeBox.width <= vp.width + 0.5, "бейдж выходит за экран по горизонтали");
+  const startBtnBox = await page.getByText("НАЧАТЬ ИГРУ").boundingBox();
+  assert.ok(!intersects(badgeBox, startBtnBox), "кнопка «НАЧАТЬ ИГРУ» наползает на бейдж версии");
   const hOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(hOverflow <= 0, "у страницы горизонтальный overflow: " + hOverflow + "px");
 
@@ -143,7 +152,11 @@ async function scenarioWithApi(browser, base) {
   await page.getByText("Тестовый вопрос №1?").waitFor({ timeout: 20000 });
   assert.ok(await page.getByText("#1/10").isVisible(), "нет счётчика вопросов");
   assert.ok(await page.getByText("Прочитать вопрос").isVisible(), "нет кнопки озвучки");
-  assert.ok(await page.getByText("v" + appVersion, { exact: true }).isVisible(), "бейдж версии пропал в игре");
+  // В игре кнопка «ОТВЕТИТЬ» прижата к низу — не должна пересекаться с бейджем (кейс со скрина)
+  const badgeInGame = await page.locator(".version-tag").boundingBox();
+  const answerBtnBox = await page.getByText("✓ ОТВЕТИТЬ").boundingBox();
+  assert.ok(badgeInGame, "бейдж версии пропал в игре");
+  assert.ok(!intersects(badgeInGame, answerBtnBox), "кнопка «ОТВЕТИТЬ» наползает на бейдж версии");
 
   // Единый ввод: текст попадает в блок «Твой ответ»
   await page.locator('input[placeholder="...или напиши ответ"]').fill("тестовый ответ");
@@ -177,12 +190,19 @@ async function scenarioWithApi(browser, base) {
   assert.strictEqual(new Set(topics).size, topics.length, "темы повторяются: " + topics.join(", "));
   assert.ok(genRequests[1].messages[1].content.includes("Тестовый вопрос №1?"), "история вопросов не передаётся");
 
-  // Проверки запроса оценки
+  // Проверки факт-чека: каждый сгенерированный вопрос проверен вторым вызовом с temperature 0
+  assert.ok(verifyRequests.length >= 2, "факт-чек не запускался: " + verifyRequests.length);
+  for (const body of verifyRequests) {
+    assert.strictEqual(body.temperature, 0, "temperature факт-чека ≠ 0");
+  }
+  assert.ok(verifyRequests[0].messages[1].content.includes("Тестовый вопрос №1?"), "факт-чек проверяет не тот вопрос");
+
+  // Проверки запроса оценки (acceptable_answers дополнены факт-чеком)
   assert.strictEqual(evalRequests.length, 1, "ожидали 1 запрос оценки");
   const ev = evalRequests[0];
   assert.strictEqual(ev.temperature, 0.2, "temperature оценки ≠ 0.2");
   assert.ok(ev.messages[1].content.includes("Допустимые варианты ответа"), "судье не передали acceptable_answers");
-  assert.ok(ev.messages[1].content.includes("вариант а; вариант б"));
+  assert.ok(ev.messages[1].content.includes("вариант а; вариант б; проверенный вариант"), "варианты факт-чека не домержились");
   assert.ok(ev.messages[1].content.includes("Ответ игрока: тестовый ответ"));
 
   // Навигация: выход на главную из игры через 🏠 с двухтаповым подтверждением
