@@ -155,6 +155,14 @@ async function main() {
     const r = T.localScore("редстоуновая руда", { correct_answer: "Из редстоуновой руды", acceptable_answers: [] });
     assert.ok(r.score >= 4, "ожидали ≥4, получили " + r.score);
   });
+  test("огрехи ASR в окончаниях = 5 (кейс со скрина: «Шелковая касание»)", () => {
+    const r = T.localScore("Шелковая касание", { correct_answer: "Шёлковое касание", acceptable_answers: [] });
+    assert.strictEqual(r.score, 5, "расхождение только в окончании должно давать 5");
+  });
+  test("лишние значимые слова в ответе — по-прежнему 4, а не 5", () => {
+    const r = T.localScore("наверное это шелковое касание кирки", { correct_answer: "Шёлковое касание", acceptable_answers: [] });
+    assert.strictEqual(r.score, 4);
+  });
   test("совсем не то = 1", () => {
     const r = T.localScore("эндермен", { correct_answer: "Крипер", acceptable_answers: [] });
     assert.strictEqual(r.score, 1);
@@ -280,6 +288,12 @@ async function main() {
   test("промпт оценки без acceptable_answers не содержит блока вариантов", () => {
     const p = T.buildEvalUserPrompt({ question: "В?", correct_answer: "О", acceptable_answers: [] }, "х");
     assert.ok(!p.includes("Допустимые варианты"));
+  });
+  test("судья инструктирован прощать окончания/род/падеж (огрехи ASR)", () => {
+    assert.ok(/окончани/.test(T.EVAL_SYSTEM_PROMPT), "в системном промпте судьи нет правила про окончания");
+    assert.ok(/ПОЛНОЕ совпадение/.test(T.EVAL_SYSTEM_PROMPT));
+    const p = T.buildEvalUserPrompt({ question: "В?", correct_answer: "О", acceptable_answers: [] }, "х");
+    assert.ok(/окончания и падежи неточностью НЕ считаются/.test(p), "в шкале нет оговорки про окончания");
   });
 
   console.log("\ncallAI:");

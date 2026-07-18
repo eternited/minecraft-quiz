@@ -87,8 +87,8 @@ const aiChoice = (obj) => ({
 });
 
 async function scenarioWithApi(browser, base) {
-  console.log("\nСценарий 1: игра с API-ключом (мок DeepSeek)");
-  const context = await browser.newContext();
+  console.log("\nСценарий 1: игра с API-ключом (мок DeepSeek), вьюпорт iPhone 12 Pro");
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const pageErrors = [];
   const genRequests = [];
   const evalRequests = [];
@@ -125,10 +125,17 @@ async function scenarioWithApi(browser, base) {
   await page.goto(base);
   await page.getByText("DeepSeek API-ключ сохранён").waitFor({ timeout: 20000 });
 
-  // Бейдж версии виден и совпадает с APP_VERSION
+  // Бейдж версии виден, совпадает с APP_VERSION и вписан в экран (без вылезания за края)
   const appVersion = await page.evaluate(() => window.__MCQUIZ_TEST__.APP_VERSION);
   assert.match(appVersion, /^\d+\.\d+\.\d+$/, "APP_VERSION не semver");
   assert.ok(await page.getByText("v" + appVersion, { exact: true }).isVisible(), "нет бейджа версии на старте");
+  const vp = page.viewportSize();
+  const box = await page.locator(".version-tag").boundingBox();
+  assert.ok(box, "у бейджа версии нет boundingBox");
+  assert.ok(box.x >= 0 && box.x + box.width <= vp.width + 0.5, "бейдж выходит за экран по горизонтали");
+  assert.ok(box.y >= 0 && box.y + box.height <= vp.height + 0.5, "бейдж выходит за экран по вертикали");
+  const hOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(hOverflow <= 0, "у страницы горизонтальный overflow: " + hOverflow + "px");
 
   await page.getByText("НАЧАТЬ ИГРУ").click();
 
