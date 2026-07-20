@@ -355,7 +355,11 @@ async function scenarioUpdateUx(browser, base) {
   let genCount = 0;
 
   await context.addInitScript(() => {
-    localStorage.setItem("mc_quiz_api_key", "test-key-123");
+    // ключ сеем только если его нет — чтобы тест мог проверить сохранность
+    // значения, «введённого пользователем», через перезагрузки-обновления
+    if (!localStorage.getItem("mc_quiz_api_key")) {
+      localStorage.setItem("mc_quiz_api_key", "test-key-123");
+    }
     window.__MCQUIZ_TUNE__ = { firstCheck: 600, calm: 400, interval: 3600000 };
     // Кладём в кэш оболочки «старый» ETag → приложение решит, что на сервере новая версия
     caches.open("mcquiz-shell-v1").then((c) =>
@@ -410,6 +414,9 @@ async function scenarioUpdateUx(browser, base) {
   await page.getByText("5 из 5").waitFor({ timeout: 20000 });
   await page.getByText("Появилась новая версия").waitFor({ timeout: 10000 });
 
+  // API-ключ, «введённый пользователем», обязан пережить обновление версии
+  await page.evaluate(() => localStorage.setItem("mc_quiz_api_key", "persist-check-999"));
+
   // Кнопка «Обновить» → перезагрузка (SW в этом сценарии заблокирован → путь no-sw)
   await Promise.all([
     page.waitForNavigation({ timeout: 15000 }),
@@ -418,6 +425,13 @@ async function scenarioUpdateUx(browser, base) {
   await page.getByText("НАЧАТЬ ИГРУ").waitFor({ timeout: 20000 });
   const stamp2 = await page.evaluate(() => localStorage.getItem("lastAutoUpd"));
   assert.ok(stamp2 && stamp2 !== stamp, "обновление с плашки не записало новую метку lastAutoUpd");
+  assert.strictEqual(
+    await page.evaluate(() => localStorage.getItem("mc_quiz_api_key")),
+    "persist-check-999",
+    "API-ключ не пережил обновление версии"
+  );
+  assert.ok(await page.getByText("DeepSeek API-ключ сохранён").isVisible(),
+    "после обновления пропала пометка о сохранённом ключе");
 
   assert.deepStrictEqual(pageErrors, [], "ошибки на странице: " + pageErrors.join("; "));
   await context.close();
